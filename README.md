@@ -1,6 +1,5 @@
 # BOY series 2.0 (KICKBOY / BASSBOY / TUNEBOY) by sonicsystems
 
-Three tiny VST3 instruments for hardstyle, with a Game Boy look and four colour themes.
 
 ![BOY series at a glance](docs/infographic.png)
 
