@@ -128,7 +128,7 @@ int generate (const GenParams& g, Note* out)
 }
 
 enum { keyI, scaleI, progI, barsI, rhythmI, densI, octI, rangeI, seedI, chordsI, reverbI, outI,
-       detuneI, widthI, cutoffI, resoI, fenvI, attackI, decayI, sustainI, releaseI, rsizeI, midioutI, playI, syncI, variationI };
+       detuneI, widthI, cutoffI, resoI, fenvI, attackI, decayI, sustainI, releaseI, rsizeI, midioutI, playI, syncI, variationI, modeI };
 
 std::vector<Spec> tuneSpecs()
 {
@@ -160,6 +160,7 @@ std::vector<Spec> tuneSpecs()
         C ("play",   "Play",      { "Both", "Melody", "Chords" }, 0, false, false),
         C ("sync",   "Start",     { "Key (restart)", "Song position" }, 0, false, false),
         I ("variation", "Variation", 0, 99, 0, false, 0, 0).as (Ui::hidden),
+        C ("mode",   "Mode",      { "Melody", "Single Note" }, 0, true, false),
     };
 }
 
@@ -282,6 +283,9 @@ public:
         const int n = buf.getNumSamples();
         juce::MidiBuffer& out = outMidi; out.clear();
 
+        if (get (modeI) > 0.5f) { renderSingle (buf, midi, n, out); return; }
+        if (wasSingle) { wasSingle = false; releaseVoices (0); nHeld = 0; running = false; justStarted = true; }
+
         const auto gp = genParams();
         const auto key = keyOf (gp);
         if (key != lastKey)
@@ -335,6 +339,28 @@ public:
         midi.swapWith (out);
         renderSynth (buf, n);
         guiBeat.store (running ? (float) std::fmod (songMode ? blockHostPpq + n * ppqInc : pos, loopLen) : -1.0f, std::memory_order_relaxed);
+    }
+
+    // SINGLE NOTE mode: no generator, the keys you play sound as they are (polyphonic, same supersaw)
+    void renderSingle (juce::AudioBuffer<float>& buf, juce::MidiBuffer& midi, int n, juce::MidiBuffer& out)
+    {
+        if (! wasSingle) { wasSingle = true; releaseVoices (0); sendOffs (out, 0); nHeld = 0; running = false; pendingRegen = false; }
+        for (const auto m : midi)
+        {
+            const int e = juce::jlimit (0, n - 1, m.samplePosition);
+            const auto msg = m.getMessage();
+            if (msg.isNoteOn())
+            {
+                noteOff (msg.getNoteNumber(), false, e);   // the same key again: the old note ends, the new one starts
+                noteOn (msg.getNoteNumber(), msg.getFloatVelocity(), false, e);
+            }
+            else if (msg.isNoteOff()) noteOff (msg.getNoteNumber(), false, e);
+            else if (msg.isAllNotesOff() || (msg.isController() && msg.getControllerNumber() == 123)) releaseVoices (e);
+            else if (msg.isAllSoundOff() || (msg.isController() && msg.getControllerNumber() == 120)) { for (auto& v : voices) v.active = false; rev.reset(); }
+        }
+        midi.clear();
+        renderSynth (buf, n);
+        guiBeat.store (-1.0f, std::memory_order_relaxed);
     }
 
     std::atomic<float> guiBeat { -1.0f };   // where the melody is (beats in the loop), -1 = silent
@@ -483,7 +509,7 @@ private:
 
     float sr = 44100; Voice voices[16]; juce::Reverb rev; Limiter lim; Smooth outSm;
     Note notes[maxNotes]; int numNotes = 0; std::array<int, 26> lastKey {};
-    bool outOn[2][128] {}; bool wasHostPlaying = false, running = false, songMode = false, justStarted = false, pendingRegen = false;
+    bool outOn[2][128] {}; bool wasHostPlaying = false, running = false, wasSingle = false, songMode = false, justStarted = false, pendingRegen = false;
     int held[16] {}; int nHeld = 0, transpose = 0;
     double pos = 0, loopLen = 32, ppqInc = 0.001, blockHostPpq = 0;
     juce::MidiBuffer outMidi;
@@ -564,6 +590,8 @@ protected:
                 g.fillRect (x, y, w - 1, juce::jmax (2.0f, rowH - 1));
             }
         }
+        if (real ("mode") > 0.5f)
+            heroLabel (g, monoFont (22.0f), r, "SINGLE NOTE  |  the melody is paused", col::ink, juce::Justification::bottomRight);
         const float beat = tp.guiBeat.load();
         if (beat >= 0.0f)
         {
@@ -587,6 +615,7 @@ protected:
     }
     juce::String heroHint (juce::Point<float> p) override
     {
+        if (real ("mode") > 0.5f) return "Single Note: the keys you play sound as they are (Mode: Melody brings it back)";
         return header (heroArea).expanded (0, 3).contains (p) ? "click a bar number: lock / unlock that bar"
                                                               : "the melody (bright) and the chords (dim); changes start at the next bar while it plays";
     }

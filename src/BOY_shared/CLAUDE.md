@@ -35,13 +35,15 @@ VST3 only (no CLAP / Standalone: smallest footprint). Parameter IDs frozen; add 
 ## Per plugin (2.0)
 - KICKBOY: play the key (note folded into E1..D#2, Tune 0); retrigger declick (the jump at a new note fades in 3 ms);
   Note End FULL/CUT (`noteend`); OWN SOUND (`Sonic::OwnSound`, params own*); hero = pitch curve (dot on the curve at
-  half the decay: drag = Pitch Decay / Pitch Start).
+  half the decay: drag = Pitch Decay / Pitch Start). Rumble Tail (`rfollow`, last param, default Follow): the rumble ends with
+  Length + Release (2026-10-21: before it rang on for seconds = the "bleeding"; Free = old behaviour). The render test checks that no preset rings on.
 - BASSBOY: same note map as KICKBOY; Voices Mono/Chord (up to 4, shared fold); 2x oversampled distortion (`os`);
   real-cents detune; 14 patterns + Custom (`custom` = 16-bit step mask, edited by clicking the hero's steps);
   hero = one bar of swells, drag = Kick Gap / Swell, playhead.
 - TUNEBOY: real-cents detune; resume sounding notes on key change (both modes); a change while playing applies at the
   next bar line; VARIATION (`variation`, hidden param) + bar locks (state property `locks`, lock code = 1 + seed +
   10000 * variation); 10 rhythms; tempo + track names in the .mid; hero = roll with playhead, click bar numbers = lock.
+  Mode (`mode`, last param, main page): Melody / Single Note (2026-10-21: the keys sound as plain polyphonic notes, no generator, no MIDI out).
 
 ## Test
 `<X>Render demo.wav gui.png` must print `RESULT: PASS` (build_all runs it). Also writes `gui_advanced.png`.

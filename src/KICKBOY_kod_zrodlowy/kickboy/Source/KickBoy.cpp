@@ -12,7 +12,7 @@ namespace
 {
 enum { tuneI, pstartI, pdecayI, punchI, driveI, dtypeI, toneI, rumbleI, lengthI, releaseI, lowcutI, outI,
        pcurveI, shapeI, ctoneI, cdecayI, dmixI, rdecayI, rdriveI, rtoneI, rdelayI, attackI, tiltI, velI, ktrackI, ceilI, osI,
-       noteendI };
+       noteendI, ownA, ownB, ownC, ownD, rfollowI };   // own* = the 4 OWN SOUND params, then the newest
 
 std::vector<Spec> kickSpecs()
 {
@@ -49,6 +49,7 @@ std::vector<Spec> kickSpecs()
         C ("noteend","Note End",     { "Full", "Cut" }, 0, false, false),
     };
     addOwnSoundSpecs (s, false);
+    s.push_back (C ("rfollow", "Rumble Tail", { "Free", "Follow" }, 1, false, false));   // Follow: the rumble ends with Length + Release
     return s;
 }
 
@@ -127,7 +128,7 @@ public:
         const float rDrive = juce::Decibels::decibelsToGain (get (rdriveI)), rDelay = get (rdelayI) * 0.001f;
         const float att = juce::jmax (0.0001f, get (attackI) * 0.001f), len = get (lengthI) * 0.001f, rel = juce::jmax (0.001f, get (releaseI) * 0.001f);
         const float velAmt = get (velI), outG = juce::Decibels::decibelsToGain (get (outI));
-        const bool useOs = get (osI) > 0.5f, cut = get (noteendI) > 0.5f;
+        const bool useOs = get (osI) > 0.5f, cut = get (noteendI) > 0.5f, rFollow = get (rfollowI) > 0.5f;
         tone.set (get (toneI), 0.707f, sr); rtone.set (get (rtoneI), 0.9f, sr);
         clickF.set (get (ctoneI), 0.8f, sr); clickHp.set (300.0f, sr);
         hp1.set (get (lowcutI), sr); hp2.set (get (lowcutI), sr); tilt.set (get (tiltI), sr); lim.set (sr, get (ceilI));
@@ -182,10 +183,11 @@ public:
                 const float rt = t - rDelay;
                 float renv = rt > 0 ? (1 - std::exp (-rt / 0.015f)) * std::exp (-rt / rDec) : 0.0f;
                 if (relAt >= 0.0f && t > relAt) renv *= std::exp (-(t - relAt) / rel * 3.0f);
+                if (rFollow && t > holdEnd) renv *= std::exp (-(t - holdEnd) / rel * 3.0f);   // no ringing after the kick is over
                 rum[(size_t) i] = rumbleL * renv * velG * rtone.lp (softClip (std::sin (juce::MathConstants<float>::twoPi * rphase) * rDrive) * 0.8f);
                 t += 1.0f / sr;
                 const bool bodyDone = t > holdEnd + rel * 6 + 0.05f;
-                const bool rumbleDone = rumbleL <= 0.0f || t > rDelay + rDec * 6 || (relAt >= 0.0f && t > relAt + rel * 6 + 0.05f);
+                const bool rumbleDone = rumbleL <= 0.0f || rFollow || t > rDelay + rDec * 6 || (relAt >= 0.0f && t > relAt + rel * 6 + 0.05f);
                 if (bodyDone && rumbleDone) active = false;
             }
             // distortion (optionally 2x oversampled)

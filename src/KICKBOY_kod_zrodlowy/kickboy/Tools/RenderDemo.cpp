@@ -74,6 +74,27 @@ static int kickChecks (boy::BaseProcessor& base)
         std::printf ("  [%s] Note End: FULL rings %.3f, CUT %.4f after a 100 ms note\n", ok ? "OK" : "FAIL", rest[0], rest[1]); fails += ok ? 0 : 1;
         kp.setParam ("noteend", 0.0f);
     }
+    // 3b) bleed: after the kick is over nothing may keep sounding (default sound and every factory preset), and the
+    //     tail must not end with a jump
+    {
+        int bad = 0; float worst = 0.0f, worstJump = 0.0f; int worstPreset = -1;
+        for (int pr = -1; pr < (int) kp.presets.size(); ++pr)
+        {
+            if (pr >= 0) kp.applyPreset (pr);
+            else { kp.applyPreset (0); }
+            const auto y = play (kp, 5.0, { { 0.0, 55 } }, 0.05);
+            const double endSec = (kp.get (lengthI) + kp.get (releaseI) * 6.0f) * 0.001 + 0.15;
+            float quiet = 0.0f, jump = 0.0f;
+            for (int i = (int) (endSec * 44100); i < (int) y.size(); ++i) quiet = jmax (quiet, std::abs (y[(size_t) i]));
+            for (int i = (int) (endSec * 44100) + 1; i < (int) y.size(); ++i) jump = jmax (jump, std::abs (y[(size_t) i] - y[(size_t) i - 1]));
+            if (quiet > worst) { worst = quiet; worstPreset = pr; }
+            worstJump = jmax (worstJump, jump);
+            if (quiet > 0.002f) ++bad;
+        }
+        const bool ok = bad == 0 && worstJump < 0.01f;
+        std::printf ("  [%s] bleed: %d presets ring on after the kick (loudest %.4f at preset %d), biggest late step %.5f\n",
+                     ok ? "OK" : "FAIL", bad, worst, worstPreset, worstJump); fails += ok ? 0 : 1;
+    }
     // 4) OWN SOUND (shared test: test tone in REPLACE, state round trip, removal)
     if (! Sonic::ownSoundSelfTest<KickProcessor> (44100.0, 256, 55, 1.2f)) ++fails;
     return fails;

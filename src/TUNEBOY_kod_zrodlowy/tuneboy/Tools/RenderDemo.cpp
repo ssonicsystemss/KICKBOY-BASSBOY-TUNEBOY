@@ -72,6 +72,30 @@ static int tuneChecks (boy::BaseProcessor& base)
         const bool ok = earlyOn == 0;
         std::printf ("  [%s] change while playing waits for the bar line (%d early notes)\n", ok ? "OK" : "FAIL", earlyOn); fails += ok ? 0 : 1;
     }
+    // 5) SINGLE NOTE: a held key sounds right away as a plain note (no generated melody, no MIDI out), a chord is polyphonic,
+    //    and after the key is released it fades out
+    {
+        tp.applyPreset (0); tp.setParam ("mode", 1.0f); tp.setParam ("reverb", 0.0f);
+        const double sr = 44100; const int bs = 256;
+        tp.setPlayConfigDetails (0, 2, sr, bs); tp.prepareToPlay (sr, bs);
+        AudioBuffer<float> buf (2, bs);
+        float held = 0.0f, after = 0.0f; int midiOut = 0;
+        for (int blk = 0; blk < 400; ++blk)
+        {
+            MidiBuffer m;
+            if (blk == 0) { m.addEvent (MidiMessage::noteOn (1, 57, (uint8) 100), 0); m.addEvent (MidiMessage::noteOn (1, 64, (uint8) 100), 0); }
+            if (blk == 200) { m.addEvent (MidiMessage::noteOff (1, 57), 0); m.addEvent (MidiMessage::noteOff (1, 64), 0); }
+            tp.processBlock (buf, m);
+            midiOut += m.getNumEvents();
+            const float pk = buf.getMagnitude (0, bs);
+            if (blk >= 50 && blk < 200) held = jmax (held, pk);
+            if (blk >= 380) after = jmax (after, pk);
+        }
+        const bool ok = held > 0.02f && after < 0.001f && midiOut == 0;
+        std::printf ("  [%s] single note: level while held %.3f, after release %.5f, %d MIDI events out\n", ok ? "OK" : "FAIL", held, after, midiOut);
+        fails += ok ? 0 : 1;
+        tp.setParam ("mode", 0.0f);
+    }
     return fails;
 }
 
