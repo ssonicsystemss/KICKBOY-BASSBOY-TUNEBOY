@@ -2,7 +2,7 @@
 
 ## Download (Windows VST3)
 
-Skompilowane pluginy (te same, które są obecnie w FL Studio): [release v2026-10-21](https://github.com/ssonicsystemss/KICKBOY-BASSBOY-TUNEBOY/releases/tag/v2026-10-21)
+compiled:
 
 - [KICKBOY-win64-vst3.zip](https://github.com/ssonicsystemss/KICKBOY-BASSBOY-TUNEBOY/releases/download/v2026-10-21/KICKBOY-win64-vst3.zip)
 - [BASSBOY-win64-vst3.zip](https://github.com/ssonicsystemss/KICKBOY-BASSBOY-TUNEBOY/releases/download/v2026-10-21/BASSBOY-win64-vst3.zip)
