@@ -70,6 +70,17 @@ public:
         g.setColour (down || over ? col::inkInverse : col::ink);
         g.drawText (b.getButtonText(), b.getLocalBounds(), juce::Justification::centred, false);
     }
+    void drawCornerResizer (juce::Graphics& g, int w, int h, bool over, bool dragging) override
+    {
+        g.setColour (over || dragging ? col::inkInverse : col::inkInverse.withAlpha (0.8f));
+        for (int i = 0; i < 3; ++i)   // three pixel steps
+        {
+            const float step = (float) (4 + i * 5);
+            g.fillRect ((float) w - step - 2.0f, (float) h - 6.0f, 3.0f, 3.0f);
+            g.fillRect ((float) w - 5.0f, (float) h - step - 2.0f, 3.0f, 3.0f);
+        }
+        juce::ignoreUnused (h);
+    }
     juce::Typeface::Ptr pix, mono;
 };
 
@@ -136,7 +147,21 @@ public:
         startTimerHz (15);
     }
     // the plugin's editor calls this at the end of its constructor (the layout asks its virtual hooks)
-    void init() { setSize (initialSize.x, initialSize.y); layout(); }
+    void init()
+    {
+        float sc = juce::jlimit (minScale, maxScale, (float) (double) proc.apvts.state.getProperty ("uiScale", 1.0));
+        if (auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())   // never bigger than the screen
+            sc = juce::jmin (sc, 0.95f * (float) d->userArea.getWidth() / (float) initialSize.x, 0.9f * (float) d->userArea.getHeight() / (float) initialSize.y);
+        sc = juce::jmax (minScale, sc);
+        setResizable (true, true);
+        setResizeLimits (juce::roundToInt ((float) initialSize.x * minScale), juce::roundToInt ((float) initialSize.y * minScale),
+                         juce::roundToInt ((float) initialSize.x * maxScale), juce::roundToInt ((float) initialSize.y * maxScale));
+        if (auto* c = getConstrainer()) c->setFixedAspectRatio ((double) initialSize.x / (double) initialSize.y);
+        setSize (juce::roundToInt ((float) initialSize.x * sc), juce::roundToInt ((float) initialSize.y * sc));
+        layout();
+        sizeReady = true;
+    }
+    float scale() const { return uiScale; }   // 1 = design size (960 x 580 / 600)
     ~Editor() override { stopTimer(); setLookAndFeel (nullptr); }
 
     // render tests: the ADVANCED page
@@ -145,7 +170,12 @@ public:
     // once the host has put us into its window: the outer wrapper must not take the keyboard on a click either
     void parentHierarchyChanged() override { hostkeys::dontGrab (*this); }
 
-    void resized() override { layout(); }
+    void resized() override
+    {
+        if (initialSize.x > 0 && getWidth() > 0) uiScale = (float) getWidth() / (float) initialSize.x;
+        layout();
+        if (sizeReady) proc.apvts.state.setProperty ("uiScale", juce::String (uiScale, 3), nullptr);   // the window size is remembered
+    }
 
     // the theme lives in the state; colours are global per plugin, so each editor re-selects its own before painting
     void useTheme()
@@ -157,8 +187,9 @@ public:
     void paint (juce::Graphics& g) override
     {
         useTheme();
-        const auto b = getLocalBounds().toFloat();
         g.fillAll (col::ground);
+        g.addTransform (juce::AffineTransform::scale (uiScale));   // everything below is drawn at the design size
+        const auto b = logicalBounds();
         paintTop (g);
         if (! advanced && heroArea.getHeight() > 0)
         {
@@ -185,8 +216,9 @@ public:
     }
 
     // ---------------------------------------------------------------- mouse
-    void mouseMove (const juce::MouseEvent& e) override
+    void mouseMove (const juce::MouseEvent& e0) override
     {
+        const auto e = scaled (e0);
         const int h = ctlAt (e.position), hb = buttonAt (e.position);
         juce::String hint;
         if (h >= 0) hint = describe (h) + "   |   right-click: automation clip / freeze";
@@ -197,8 +229,9 @@ public:
     }
     void mouseExit (const juce::MouseEvent&) override { hover = hoverButton = -1; hintText = {}; repaint(); }
 
-    void mouseDown (const juce::MouseEvent& e) override
+    void mouseDown (const juce::MouseEvent& e0) override
     {
+        const auto e = scaled (e0);
         const auto pos = e.position;
         if (const int i = ctlAt (pos); i >= 0)
         {
@@ -220,15 +253,20 @@ public:
             return;
         }
         if (const int b = buttonAt (pos); b >= 0) { pressedButton = b; dragStarted = false; return; }
-        if (! advanced && heroArea.contains (pos) && ! e.mods.isPopupMenu()) heroDragging = heroDown (pos, e);
+        if (! advanced && heroArea.contains (pos))
+        {
+            if (e.mods.isPopupMenu()) heroContext (pos, e);
+            else heroDragging = heroDown (pos, e);
+        }
     }
-    void mouseDrag (const juce::MouseEvent& e) override
+    void mouseDrag (const juce::MouseEvent& e0) override
     {
+        const auto e = scaled (e0);
         if (heroDragging) { heroDrag (e.position, e); return; }
         if (pressedButton >= 0)
         {
             auto& b = buttons[(size_t) pressedButton];
-            if (b.drag && ! dragStarted && e.getDistanceFromDragStart() > 4) { dragStarted = true; dragOut (b); }
+            if (b.drag && ! dragStarted && e0.getDistanceFromDragStart() > 4) { dragStarted = true; dragOut (b); }
             return;
         }
         if (active < 0) return;
@@ -240,8 +278,9 @@ public:
         lastPos = e.position;
         param (c.idx)->setValueNotifyingHost (snap (c.idx, dragNorm));
     }
-    void mouseUp (const juce::MouseEvent& e) override
+    void mouseUp (const juce::MouseEvent& e0) override
     {
+        const auto e = scaled (e0);
         if (heroDragging) { heroDragging = false; heroUp(); return; }
         if (pressedButton >= 0)
         {
@@ -254,8 +293,10 @@ public:
         if (e.mouseWasClicked() && ! e.mods.isPopupMenu()) zoneClick (zoneAt (e.position));
         if (hostkeys::safeToGiveBack()) hostkeys::giveBack (*this);   // FL's keyboard plays notes again right away
     }
-    void mouseDoubleClick (const juce::MouseEvent& e) override
+    void mouseDoubleClick (const juce::MouseEvent& e0) override
     {
+        const auto e = scaled (e0);
+        if (! advanced && ctlAt (e.position) < 0 && buttonAt (e.position) < 0 && heroArea.contains (e.position)) { heroDoubleClick (e.position, e); return; }
         if (const int i = ctlAt (e.position); i >= 0)
         {
             const auto k = ctls[(size_t) i].kind;
@@ -263,8 +304,9 @@ public:
                 setNorm (ctls[(size_t) i].idx, param (ctls[(size_t) i].idx)->getDefaultValue());
         }
     }
-    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
+    void mouseWheelMove (const juce::MouseEvent& e0, const juce::MouseWheelDetails& w) override
     {
+        const auto e = scaled (e0);
         const int i = ctlAt (e.position);
         if (i < 0 || std::abs (w.deltaY) < 1.0e-4f) return;
         auto* p = param (ctls[(size_t) i].idx);
@@ -293,6 +335,9 @@ protected:
     virtual bool heroDown (juce::Point<float>, const juce::MouseEvent&) { return false; }   // true = this click drags
     virtual void heroDrag (juce::Point<float>, const juce::MouseEvent&) {}
     virtual void heroUp() {}
+    virtual void heroDoubleClick (juce::Point<float>, const juce::MouseEvent&) {}
+    virtual void heroContext (juce::Point<float>, const juce::MouseEvent&) {}   // right click on the hero
+    virtual int buttonColumns() const { return 1; }                              // side buttons: 1 column (default) or 2
     virtual juce::String heroHint (juce::Point<float>) { return {}; }
     virtual bool animating() const { return false; }   // true while the hero shows something moving (playhead)
     virtual bool wantsFiles() const { return false; }
@@ -374,7 +419,7 @@ private:
     // ---------------------------------------------------------------- layout
     void layout()
     {
-        auto r = getLocalBounds().toFloat();
+        auto r = logicalBounds();
         r.removeFromTop (topH);
         r.removeFromBottom (footerH);
         r = r.reduced (16.0f, 8.0f);
@@ -385,10 +430,17 @@ private:
             auto h = r.removeFromTop ((float) heroHeight());
             if (! buttons.empty())
             {
-                auto col = h.removeFromRight (150.0f);
+                const int cols = juce::jmax (1, buttonColumns()), rows = ((int) buttons.size() + cols - 1) / cols;
+                auto area = h.removeFromRight (150.0f * (float) cols + 8.0f * (float) (cols - 1));
                 h.removeFromRight (10.0f);
-                const float bh = juce::jmin (40.0f, (col.getHeight() - 6.0f * (float) (buttons.size() - 1)) / (float) buttons.size());
-                for (auto& b : buttons) { b.r = col.removeFromTop (bh); col.removeFromTop (6.0f); }
+                const float bh = juce::jmin (44.0f, (area.getHeight() - 6.0f * (float) (rows - 1)) / (float) rows);
+                for (int c = 0; c < cols; ++c)
+                {
+                    auto colR = area.removeFromLeft (150.0f);
+                    area.removeFromLeft (8.0f);
+                    for (int i = c * rows; i < juce::jmin ((int) buttons.size(), (c + 1) * rows); ++i)
+                    { buttons[(size_t) i].r = colR.removeFromTop (bh); colR.removeFromTop (6.0f); }
+                }
             }
             heroArea = h;
             r.removeFromTop (10.0f);
@@ -446,7 +498,7 @@ private:
     static constexpr float topH = 64.0f, footerH = 28.0f;
     juce::Rectangle<float> zoneRect (Zone z) const
     {
-        const float w = (float) getWidth(), y = 14.0f, h = 36.0f;
+        const float w = logicalBounds().getWidth(), y = 14.0f, h = 36.0f;
         switch (z)   // right to left: START (ADVANCED) | undo | A (RANDOMIZE) | next | SELECT (MY PRESETS) | prev
         {
             case zPage:   return { w - 160.0f, y, 144.0f, h };
@@ -474,7 +526,7 @@ private:
     }
     void paintTop (juce::Graphics& g)
     {
-        const float w = (float) getWidth();
+        const float w = logicalBounds().getWidth();
         g.setColour (col::ink);
         g.fillRect (0.0f, topH - 4.0f, w, 4.0f);   // the console's lower edge
         g.setFont (font (24.0f));
@@ -820,7 +872,7 @@ private:
         const auto key = proc.presetName() + "|" + proc.apvts.state.getProperty ("frozen").toString() + "|" + proc.apvts.state.getProperty ("theme").toString();
         if (key != seenKey) { seenKey = key; dirty = true; }
         if (statusText.isNotEmpty() && juce::Time::getMillisecondCounter() - statusAt > 4000) { statusText = {}; dirty = true; }
-        mouse = getMouseXYRelative().toFloat();
+        mouse = getMouseXYRelative().toFloat() / uiScale;
         if (! rendererChosen)   // JUCE's software renderer: no GPU device / swap chain per window = less RAM
             if (auto* peer = getPeer())
             {
@@ -844,6 +896,11 @@ private:
     int hover = -1, hoverButton = -1, active = -1, pressedButton = -1;
     bool heroDragging = false, dragStarted = false;
     juce::Point<int> initialSize;
+    float uiScale = 1.0f;
+    bool sizeReady = false;
+    static constexpr float minScale = 0.75f, maxScale = 2.0f;
+    juce::Rectangle<float> logicalBounds() const { return { 0.0f, 0.0f, (float) initialSize.x, (float) initialSize.y }; }
+    juce::MouseEvent scaled (const juce::MouseEvent& e) const { return e.withNewPosition (e.position / uiScale); }
 };
 
 // a small helper for heroes: a value as text in the hero's corner

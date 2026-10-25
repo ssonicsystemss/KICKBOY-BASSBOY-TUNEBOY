@@ -251,6 +251,8 @@ inline int testMain (int argc, char** argv, const String& kind, std::function<in
         bp->applyPreset (0);
         std::unique_ptr<AudioProcessorEditor> ed (p->createEditor());
         const File png = File::getCurrentWorkingDirectory().getChildFile (pngPath);
+        if (auto* be0 = dynamic_cast<boy::Editor*> (ed.get()))   // screenshots at the design size (the editor may have shrunk to fit this screen)
+            if (be0->scale() < 0.999f) be0->setSize (roundToInt ((float) be0->getWidth() / be0->scale()), roundToInt ((float) be0->getHeight() / be0->scale()));
         snapshot (*ed, png);
         if (auto* be = dynamic_cast<boy::Editor*> (ed.get())) { be->showAdvanced (true); snapshot (*be, png.getSiblingFile (png.getFileNameWithoutExtension() + "_advanced.png")); }
         if (auto* be2 = dynamic_cast<boy::Editor*> (ed.get()))   // one screenshot per colour theme (main page)
@@ -262,6 +264,16 @@ inline int testMain (int argc, char** argv, const String& kind, std::function<in
                 snapshot (*be2, png.getSiblingFile (png.getFileNameWithoutExtension() + "_" + boy::col::themes[t].id + ".png"));
             }
             bp->setTheme (0);
+            // resizing: the whole picture scales with the window (aspect kept), the size is remembered in the state
+            const int w0 = be2->getWidth(), h0 = be2->getHeight();
+            const float s0 = be2->scale();
+            be2->setSize ((int) (w0 * 1.5), (int) (h0 * 1.5));
+            const bool scaled = std::abs (be2->scale() - 1.5f * s0) < 0.01f;
+            snapshot (*be2, png.getSiblingFile (png.getFileNameWithoutExtension() + "_large.png"));
+            const auto kept = bp->apvts.state.getProperty ("uiScale").toString().getFloatValue();
+            be2->setSize (w0, h0);
+            std::printf ("  [%s] resizing: scale %.2f at 1.5x, remembered %.2f\n", scaled && std::abs (kept - 1.5f * s0) < 0.01f ? "OK" : "FAIL", 1.5f * s0, kept);
+            if (! (scaled && std::abs (kept - 1.5f * s0) < 0.01f)) ++fails;
         }
         std::printf ("  GUI screenshots: %s (+ _advanced)\n", png.getFullPathName().toRawUTF8());
     }

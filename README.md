@@ -16,6 +16,12 @@ compiled:
 | BASSBOY | tempo-synced reverse bass | 16-step grid with playhead |
 | TUNEBOY | melody + chords generator | piano roll, bar locks |
 
+## What's new
+- **TUNEBOY 2.2:** edit the melody in the roll (drag notes, add, delete), **DRAW** a melody with the mouse, edit undo, copy / transpose a bar,
+  16 + Custom + 10 more chord progressions, 9 scales, 14 rhythms, **CHORD STYLE** (held / offbeat / arp / gate), **PUMP** (built-in sidechain duck),
+  **OWN SOUND** (your own sample plays the notes), a bank of 24 synth sounds + **NEW SOUND** (random). RANDOMIZE no longer touches the sound.
+- **All three:** resizable windows (drag the corner; the size is remembered), four colour themes.
+
 ## Themes
 Screen (default), Night, Pocket, Virtual Boy. Pick one in the preset menu (SELECT button). The theme is stored in the
 plugin state, not as a parameter, so no parameter IDs changed.

@@ -153,6 +153,7 @@ public:
         apvts.state.setProperty ("presetName", "Random", nullptr);
         presetChanged();
     }
+    void rememberForUndo() { pushUndo(); }   // plugin-specific actions (e.g. a new synth sound) can be undone with the arrow
     bool canUndo() const { return ! undoStack.empty(); }
     void undo()
     {
@@ -210,6 +211,7 @@ public:
         auto st = apvts.copyState();
         st.removeProperty ("frozen", nullptr);
         st.removeProperty ("theme", nullptr);   // the look is yours, not part of a sound
+        st.removeProperty ("uiScale", nullptr);
         auto x = st.createXml();
         return x != nullptr && x->writeTo (userFolder().getChildFile (clean + ".boypreset"));
     }
@@ -220,9 +222,11 @@ public:
         pushUndo();
         const auto frozen = apvts.state.getProperty ("frozen");   // your freeze marks stay
         const auto theme = apvts.state.getProperty ("theme");
+        const auto uiScaleKept = apvts.state.getProperty ("uiScale");
         loadXml (*x);
         apvts.state.setProperty ("frozen", frozen, nullptr);
         apvts.state.setProperty ("theme", theme, nullptr);
+        apvts.state.setProperty ("uiScale", uiScaleKept, nullptr);
         apvts.state.setProperty ("presetIndex", -1, nullptr);
         apvts.state.setProperty ("presetName", f.getFileNameWithoutExtension(), nullptr);
         return true;
