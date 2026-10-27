@@ -517,7 +517,7 @@ private:
         switch (z)
         {
             case zPrev: case zNext: return "previous / next factory preset";
-            case zName:   return "SELECT: factory presets, MY PRESETS, save your sound, THEME";
+            case zName:   return "SELECT: factory presets, MY PRESETS, save your sound, THEME (Virtual Boy = FRENCHCORE mode)";
             case zRandom: return "A: RANDOMIZE - a new sound in musical ranges (frozen controls stay)";
             case zUndo:   return proc.canUndo() ? "undo the last RANDOMIZE / preset load" : "nothing to undo";
             case zPage:   return advanced ? "START: back to the main controls" : "START: all parameters";
@@ -531,6 +531,15 @@ private:
         g.fillRect (0.0f, topH - 4.0f, w, 4.0f);   // the console's lower edge
         g.setFont (font (24.0f));
         g.drawText (name, 16, 6, 260, 32, juce::Justification::centredLeft);
+        if (proc.frenchcore())   // FRENCHCORE mode badge
+        {
+            const juce::Rectangle<float> badge (170.0f, 12.0f, 88.0f, 22.0f);
+            g.setColour (col::ink);
+            g.fillRect (badge);
+            g.setColour (col::inkInverse);
+            g.setFont (font (16.0f));
+            g.drawText ("FC 180+", badge, juce::Justification::centred, false);
+        }
         g.setFont (monoFont (20.0f));
         g.drawText (sub, 17, 36, (int) zoneRect (zPrev).getX() - 30, 22, juce::Justification::centredLeft, true);
         auto box = [&] (Zone z, const juce::String& t, bool lit, bool pill, bool enabled = true)
@@ -816,14 +825,17 @@ private:
     void presetMenu()
     {
         juce::PopupMenu m;
-        m.addSectionHeader ("FACTORY");
-        for (int i = 0; i < (int) proc.presets.size(); ++i) m.addItem (i + 1, proc.presets[(size_t) i].name, true, i == proc.presetIndex());
+        m.addSectionHeader (proc.frenchcore() ? "FRENCHCORE PRESETS (180+ BPM)" : "FACTORY");
+        const auto& bank = proc.bank();
+        for (int i = 0; i < (int) bank.size(); ++i) m.addItem (i + 1, bank[(size_t) i].name, true, i == proc.presetIndex());
         m.addSectionHeader ("MY PRESETS");
         const auto files = proc.userPresets();
         for (int i = 0; i < files.size(); ++i)
             m.addItem (1000 + i, files[i].getFileNameWithoutExtension(), true, proc.presetIndex() < 0 && files[i].getFileNameWithoutExtension() == proc.presetName());
         m.addSectionHeader ("THEME");
         for (int i = 0; i < col::numThemes; ++i) m.addItem (3000 + i, col::themes[i].name, true, i == proc.themeIndex());
+        if (! proc.frenchPresets.empty())
+            m.addItem (3100, "FRENCHCORE mode (180+ BPM presets + RANDOMIZE)", true, proc.frenchcore());
         m.addSectionHeader ("MY SOUND");
         m.addItem (2000, "Save current sound...");
         m.addItem (2001, "Open the presets folder", true, false);
@@ -833,7 +845,17 @@ private:
             if (safe == nullptr || r <= 0) return;
             if (r < 1000) safe->proc.applyPreset (r - 1);
             else if (r < 2000) { if (safe->proc.loadUserPreset (files[r - 1000])) safe->status ("loaded " + files[r - 1000].getFileNameWithoutExtension()); }
-            else if (r >= 3000) { safe->proc.setTheme (r - 3000); safe->useTheme(); safe->status ("theme: " + juce::String (col::themes[r - 3000].name)); }
+            else if (r == 3100)
+            {
+                safe->proc.setFrenchcore (! safe->proc.frenchcore());
+                safe->status (safe->proc.frenchcore() ? "FRENCHCORE mode on: presets + RANDOMIZE are tuned for 180+ BPM (your sound stays)"
+                                                      : "FRENCHCORE mode off: the normal presets and RANDOMIZE are back");
+            }
+            else if (r >= 3000)
+            {
+                safe->proc.setTheme (r - 3000); safe->useTheme();
+                safe->status ("theme: " + juce::String (col::themes[r - 3000].name) + (safe->proc.frenchcore() ? "  |  FRENCHCORE mode on (180+ BPM presets + RANDOMIZE)" : juce::String()));
+            }
             else if (r == 2000) safe->askNameAndSave();
             else { BaseProcessor::userFolder().createDirectory(); BaseProcessor::userFolder().startAsProcess(); }
             safe->repaint();
@@ -869,7 +891,7 @@ private:
             const float v = proc.get ((int) i);
             if (v != seen[i]) { seen[i] = v; dirty = true; }
         }
-        const auto key = proc.presetName() + "|" + proc.apvts.state.getProperty ("frozen").toString() + "|" + proc.apvts.state.getProperty ("theme").toString();
+        const auto key = proc.presetName() + "|" + proc.apvts.state.getProperty ("frozen").toString() + "|" + proc.apvts.state.getProperty ("theme").toString() + "|" + proc.apvts.state.getProperty ("frenchcore").toString();
         if (key != seenKey) { seenKey = key; dirty = true; }
         if (statusText.isNotEmpty() && juce::Time::getMillisecondCounter() - statusAt > 4000) { statusText = {}; dirty = true; }
         mouse = getMouseXYRelative().toFloat() / uiScale;

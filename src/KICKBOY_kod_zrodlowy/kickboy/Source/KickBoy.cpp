@@ -19,29 +19,29 @@ std::vector<Spec> kickSpecs()
     std::vector<Spec> s {
         // MAIN (12)
         P ("tune",   "Tune",        -12, 12, 0, true, -2, 2, "st"),
-        P ("pstart", "Pitch Start",  80, 3000, 700, true, 300, 1800, "Hz", 500),
-        P ("pdecay", "Pitch Decay",  5, 400, 60, true, 25, 160, "ms", 80),
-        P ("punch",  "Punch",        0, 1, 0.5f, true, 0.2f, 0.9f),
-        P ("drive",  "Drive",        0, 48, 24, true, 10, 40, "dB").as (Ui::bigKnob),
-        C ("dtype",  "Distortion",   { "Soft", "Hard", "Fold", "Crush", "Raw" }, 1, true).withIcons (distortionIcons),
-        P ("tone",   "Tone",         300, 16000, 6000, true, 1500, 12000, "Hz", 3000),
-        P ("rumble", "Rumble",       0, 1, 0.2f, true, 0, 0.6f),
-        P ("length", "Length",       40, 2000, 450, true, 200, 900, "ms", 400),
-        P ("release","Release",      2, 800, 60, true, 5, 200, "ms", 100),
-        P ("lowcut", "Low Cut",      10, 200, 25, true, 18, 40, "Hz", 50),
+        P ("pstart", "Pitch Start",  80, 3000, 700, true, 300, 1800, "Hz", 500).fr (900, 2200),
+        P ("pdecay", "Pitch Decay",  5, 400, 60, true, 25, 160, "ms", 80).fr (18, 50),
+        P ("punch",  "Punch",        0, 1, 0.5f, true, 0.2f, 0.9f).fr (0.5f, 0.9f),
+        P ("drive",  "Drive",        0, 48, 24, true, 10, 40, "dB").as (Ui::bigKnob).fr (30, 44),
+        C ("dtype",  "Distortion",   { "Soft", "Hard", "Fold", "Crush", "Raw" }, 1, true).withIcons (distortionIcons).fr (1, 4),
+        P ("tone",   "Tone",         300, 16000, 6000, true, 1500, 12000, "Hz", 3000).fr (6000, 12000),
+        P ("rumble", "Rumble",       0, 1, 0.2f, true, 0, 0.6f).fr (0.1f, 0.7f),
+        P ("length", "Length",       40, 2000, 450, true, 200, 900, "ms", 400).fr (130, 260),
+        P ("release","Release",      2, 800, 60, true, 5, 200, "ms", 100).fr (5, 50),
+        P ("lowcut", "Low Cut",      10, 200, 25, true, 18, 40, "Hz", 50).fr (20, 40),
         P ("out",    "Output",       -24, 6, -3, true, -3, -3, "dB"),
         // ADVANCED
-        P ("pcurve", "Pitch Curve",  0.5f, 8, 3, false, 1.5f, 5),
-        P ("shape",  "Body Shape",   0, 1, 0, false, 0, 0.5f),
-        P ("ctone",  "Click Tone",   500, 12000, 4000, false, 1500, 9000, "Hz", 3000),
-        P ("cdecay", "Click Decay",  0.5f, 30, 4, false, 1, 10, "ms", 5),
-        P ("dmix",   "Dist Mix",     0, 1, 1, false, 0.7f, 1),
-        P ("rdecay", "Rumble Decay", 50, 2000, 600, false, 200, 1200, "ms", 500),
-        P ("rdrive", "Rumble Drive", 0, 30, 12, false, 3, 24, "dB"),
-        P ("rtone",  "Rumble Tone",  60, 800, 200, false, 100, 400, "Hz", 200),
-        P ("rdelay", "Rumble Delay", 0, 200, 40, false, 10, 90, "ms"),
-        P ("attack", "Attack",       0, 20, 0.3f, false, 0, 1, "ms"),
-        P ("tilt",   "EQ Tilt",      -12, 12, 0, false, -4, 4, "dB"),
+        P ("pcurve", "Pitch Curve",  0.5f, 8, 3, false, 1.5f, 5).fr (2.5f, 6),
+        P ("shape",  "Body Shape",   0, 1, 0, false, 0, 0.5f).fr (0, 0.5f),
+        P ("ctone",  "Click Tone",   500, 12000, 4000, false, 1500, 9000, "Hz", 3000).fr (3000, 10000),
+        P ("cdecay", "Click Decay",  0.5f, 30, 4, false, 1, 10, "ms", 5).fr (1, 6),
+        P ("dmix",   "Dist Mix",     0, 1, 1, false, 0.7f, 1).fr (0.8f, 1),
+        P ("rdecay", "Rumble Decay", 50, 2000, 600, false, 200, 1200, "ms", 500).fr (250, 700),
+        P ("rdrive", "Rumble Drive", 0, 30, 12, false, 3, 24, "dB").fr (10, 30),
+        P ("rtone",  "Rumble Tone",  60, 800, 200, false, 100, 400, "Hz", 200).fr (100, 300),
+        P ("rdelay", "Rumble Delay", 0, 200, 40, false, 10, 90, "ms").fr (5, 40),
+        P ("attack", "Attack",       0, 20, 0.3f, false, 0, 1, "ms").fr (0, 1),
+        P ("tilt",   "EQ Tilt",      -12, 12, 0, false, -4, 4, "dB").fr (-2, 5),
         P ("vel",    "Velocity",     0, 1, 0.3f, false, 0.3f, 0.3f),
         C ("ktrack", "Key Track",    { "Off", "On" }, 1, false, false),
         P ("ceil",   "Ceiling",      -12, 0, -0.3f, false, -0.3f, -0.3f, "dB"),
@@ -80,11 +80,29 @@ std::vector<Preset> kickPresets()
 }
 }
 
+// FRENCHCORE mode (180+ BPM, on with the Virtual Boy theme): short, hard, heavily clipped kicks with a pitched tail. At 190 BPM a beat
+// is ~315 ms, so Length stays under ~260 ms and the rumble tail is the melodic part. These presets + the window in each spec's .fr().
+std::vector<Preset> kickFrenchPresets()
+{
+    return {
+        { "FC Classic 190",       { {"pstart",1400},{"pdecay",35},{"punch",0.7f},{"drive",40},{"dtype",4},{"tone",9000},{"rumble",0.35f},{"length",240},{"release",30},{"rdecay",400},{"rdrive",24},{"rdelay",20},{"pcurve",4} } },
+        { "FC Gabber Crunch",     { {"pstart",1800},{"pdecay",28},{"punch",0.8f},{"drive",44},{"dtype",1},{"tone",11000},{"rumble",0.2f},{"length",200},{"release",15},{"lowcut",30},{"pcurve",5} } },
+        { "FC Melodic Tail",      { {"pstart",1100},{"pdecay",45},{"punch",0.6f},{"drive",36},{"dtype",4},{"tone",8000},{"rumble",0.6f},{"length",260},{"release",50},{"rdecay",650},{"rdrive",20},{"rtone",180},{"rdelay",25} } },
+        { "FC Fold Hardcore",     { {"pstart",1600},{"pdecay",32},{"punch",0.75f},{"drive",38},{"dtype",2},{"tone",10000},{"rumble",0.3f},{"length",220},{"release",25},{"shape",0.3f} } },
+        { "FC Tight 200",         { {"pstart",1500},{"pdecay",26},{"punch",0.85f},{"drive",42},{"dtype",4},{"tone",11000},{"rumble",0.15f},{"length",170},{"release",10},{"lowcut",32} } },
+        { "FC Industrial Crush",  { {"pstart",1300},{"pdecay",38},{"punch",0.7f},{"drive",34},{"dtype",3},{"tone",9000},{"rumble",0.4f},{"length",230},{"release",35},{"rdrive",22} } },
+        { "FC Rolling 1/16",      { {"pstart",1500},{"pdecay",22},{"punch",0.8f},{"drive",40},{"dtype",1},{"tone",10000},{"rumble",0.0f},{"length",110},{"release",5},{"lowcut",35} } },
+        { "FC Dark Rumble",       { {"pstart",1000},{"pdecay",42},{"punch",0.55f},{"drive",38},{"dtype",4},{"tone",6500},{"rumble",0.8f},{"length",250},{"release",45},{"rdecay",600},{"rtone",140},{"rdrive",26},{"tilt",-2} } },
+        { "FC Euphoric Frenchcore", { {"pstart",900},{"pdecay",50},{"punch",0.5f},{"drive",30},{"dtype",0},{"tone",7000},{"rumble",0.5f},{"length",280},{"release",60},{"rdecay",700},{"rtone",170} } },
+        { "FC Hard Stab",         { {"pstart",2000},{"pdecay",20},{"punch",0.9f},{"drive",44},{"dtype",4},{"tone",12000},{"rumble",0.1f},{"length",140},{"release",8},{"lowcut",38},{"pcurve",6} } },
+    };
+}
+
 class KickProcessor : public BaseProcessor
 {
 public:
     KickProcessor() : BaseProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true), kickSpecs(), kickPresets())
-    { own.attach (apvts); }
+    { setFrenchPresets (kickFrenchPresets()); own.attach (apvts); }
     const juce::String getName() const override { return BOY_NAME; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }

@@ -21,6 +21,12 @@ Instrument VST3. Trzymaj długą nutę (np. cały takt) i włącz play – bas s
 - Detune liczy prawdziwe centy (wcześniej był ~1,4× za szeroki).
 - Zatrzymuje się po puszczeniu klawisza i po zatrzymaniu transportu. Bez playa też gra (Free BPM albo tempo projektu).
 
+## Tryb FRENCHCORE (180+ BPM)
+Wybierz motyw **Virtual Boy** (klik w nazwę presetu → THEME) – tryb włącza się sam (znaczek FRENCHCORE u góry). Można go też włączyć / wyłączyć
+ręcznie w tym samym menu („FRENCHCORE mode”). Brzmienie, które masz, **nie zmienia się** przy przełączeniu.
+- **Presety:** w trybie FRENCHCORE lista presetów to osobna paczka pod 180–200 BPM (nazwy zaczynają się od „FC”).
+- **RANDOMIZE:** losuje w węższym oknie wartości, które dobrze działają przy 180+ BPM: szybsze swelle (Swell 0.9–1.8), szerszy Kick Gap (0.25–0.5), wzory Classic / Rolling / Gallop / Bounce, twardszy przester, wyższy Cutoff. Presety ustawiają też Free BPM 190–200.
+
 ## Wspólne dla serii BOY
 Presety + **MY PRESETS** (klik w nazwę), **RANDOMIZE** + **↶** cofnij, prawy klik: *Create automation clip* / *Freeze* /
 *Reset* – opis w README KICKBOY-a.

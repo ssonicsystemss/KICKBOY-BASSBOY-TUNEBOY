@@ -44,26 +44,26 @@ std::array<bool, 16> stepsOf (int pattern, int custom)
 std::vector<Spec> bassSpecs()
 {
     return {
-        P ("gap",    "Kick Gap",    0, 0.8f, 0.3f, true, 0.2f, 0.45f),
-        P ("swell",  "Swell",       0.3f, 4, 1.6f, true, 0.8f, 2.8f),
-        P ("rise",   "Pitch Rise",  0, 24, 5, true, 0, 12, "st"),
-        P ("mix",    "Saw/Sine",    0, 1, 0.5f, true, 0.2f, 0.8f),
-        P ("detune", "Detune",      0, 50, 12, true, 4, 30, "ct"),
-        P ("drive",  "Drive",       0, 36, 12, true, 4, 26, "dB").as (Ui::bigKnob),
-        P ("cutoff", "Cutoff",      40, 12000, 900, true, 300, 4000, "Hz", 1000),
-        P ("reso",   "Resonance",   0.5f, 8, 1.2f, true, 0.6f, 3.5f),
-        P ("fenv",   "Filter Env",  0, 6, 2, true, 0.5f, 4, "oct"),
-        P ("glide",  "Glide",       0, 500, 40, true, 0, 150, "ms", 100),
-        C ("pattern","Pattern",     patternNames, 0, true).withIcons (patternIcons),
+        P ("gap",    "Kick Gap",    0, 0.8f, 0.3f, true, 0.2f, 0.45f).fr (0.25f, 0.5f),
+        P ("swell",  "Swell",       0.3f, 4, 1.6f, true, 0.8f, 2.8f).fr (0.9f, 1.8f),
+        P ("rise",   "Pitch Rise",  0, 24, 5, true, 0, 12, "st").fr (0, 7),
+        P ("mix",    "Saw/Sine",    0, 1, 0.5f, true, 0.2f, 0.8f).fr (0.1f, 0.6f),
+        P ("detune", "Detune",      0, 50, 12, true, 4, 30, "ct").fr (4, 22),
+        P ("drive",  "Drive",       0, 36, 12, true, 4, 26, "dB").as (Ui::bigKnob).fr (14, 34),
+        P ("cutoff", "Cutoff",      40, 12000, 900, true, 300, 4000, "Hz", 1000).fr (800, 3500),
+        P ("reso",   "Resonance",   0.5f, 8, 1.2f, true, 0.6f, 3.5f).fr (0.8f, 3),
+        P ("fenv",   "Filter Env",  0, 6, 2, true, 0.5f, 4, "oct").fr (0.5f, 3),
+        P ("glide",  "Glide",       0, 500, 40, true, 0, 150, "ms", 100).fr (0, 60),
+        C ("pattern","Pattern",     patternNames, 0, true).withIcons (patternIcons).fr (0, 3),
         P ("out",    "Output",      -24, 6, -4, true, -4, -4, "dB"),
         // ADVANCED
-        C ("dtype",  "Distortion",  { "Soft", "Hard", "Fold", "Crush", "Raw" }, 0, false).withIcons (distortionIcons),
+        C ("dtype",  "Distortion",  { "Soft", "Hard", "Fold", "Crush", "Raw" }, 0, false).withIcons (distortionIcons).fr (1, 4),
         C ("sub",    "Sine Octave", { "0", "-1" }, 0, false),
         I ("oct",    "Octave",      -2, 2, 0, false, -1, 0),
-        P ("width",  "Width",       0, 1, 0.3f, false, 0, 0.6f),
-        P ("fade",   "End Fade",    0.5f, 20, 3, false, 1, 6, "ms"),
-        P ("lowcut", "Low Cut",     10, 200, 30, false, 20, 45, "Hz", 50),
-        P ("tilt",   "EQ Tilt",     -12, 12, 0, false, -3, 3, "dB"),
+        P ("width",  "Width",       0, 1, 0.3f, false, 0, 0.6f).fr (0, 0.4f),
+        P ("fade",   "End Fade",    0.5f, 20, 3, false, 1, 6, "ms").fr (1, 4),
+        P ("lowcut", "Low Cut",     10, 200, 30, false, 20, 45, "Hz", 50).fr (25, 45),
+        P ("tilt",   "EQ Tilt",     -12, 12, 0, false, -3, 3, "dB").fr (-2, 3),
         P ("vel",    "Velocity",    0, 1, 0.2f, false, 0.2f, 0.2f),
         C ("sync",   "Sync",        { "Host", "Free" }, 0, false, false),
         P ("bpm",    "Free BPM",    100, 220, 150, false, 150, 150),
@@ -105,10 +105,28 @@ std::vector<Preset> bassPresets()
 }
 }
 
+// FRENCHCORE mode (180+ BPM, on with the Virtual Boy theme): at 190 BPM a beat is ~315 ms, so the swells are faster (Swell ~1-1.8),
+// the kick gap is wider, the patterns are the straight / rolling / gallop ones and the distortion is hard. The presets also set Free BPM 190.
+std::vector<Preset> bassFrenchPresets()
+{
+    return {
+        { "FC Rolling Bass 190",    { {"bpm",190},{"pattern",1},{"gap",0.3f},{"swell",1.2f},{"rise",3},{"mix",0.3f},{"drive",28},{"dtype",4},{"cutoff",1800},{"reso",1.8f},{"fenv",2.5f} } },
+        { "FC Gallop Raw",          { {"bpm",190},{"pattern",2},{"gap",0.3f},{"swell",1.1f},{"rise",5},{"mix",0.15f},{"drive",32},{"dtype",4},{"cutoff",2500},{"reso",2},{"detune",18} } },
+        { "FC Classic Offbeat 200", { {"bpm",200},{"pattern",0},{"gap",0.4f},{"swell",1.4f},{"rise",4},{"mix",0.35f},{"drive",24},{"dtype",1},{"cutoff",1400} } },
+        { "FC Bounce Hard",         { {"bpm",190},{"pattern",3},{"gap",0.35f},{"swell",1.3f},{"drive",26},{"dtype",1},{"cutoff",2000},{"reso",2.5f} } },
+        { "FC Stutter Bass",        { {"bpm",190},{"pattern",12},{"gap",0.25f},{"swell",1.0f},{"mix",0.25f},{"cutoff",1700},{"drive",30},{"dtype",2} } },
+        { "FC Dark Rumble Bass",    { {"bpm",185},{"pattern",1},{"gap",0.35f},{"swell",1.5f},{"mix",0.7f},{"drive",20},{"cutoff",700},{"fenv",1.5f},{"tilt",-3},{"sub",1} } },
+        { "FC Screamer",            { {"bpm",195},{"pattern",1},{"gap",0.3f},{"swell",1.0f},{"dtype",4},{"drive",36},{"mix",0.05f},{"cutoff",3800},{"reso",3},{"rise",9},{"tilt",3} } },
+        { "FC Pumping Chords",      { {"bpm",190},{"pattern",12},{"voices",1},{"gap",0.3f},{"swell",1.1f},{"mix",0.4f},{"cutoff",1500},{"width",0.5f},{"drive",18} } },
+        { "FC Tight Short",         { {"bpm",190},{"gap",0.5f},{"swell",1.8f},{"rise",2},{"cutoff",1500},{"drive",22},{"dtype",4} } },
+        { "FC Crushed Industrial",  { {"bpm",200},{"pattern",1},{"gap",0.3f},{"swell",1.1f},{"dtype",3},{"drive",22},{"cutoff",1400} } },
+    };
+}
+
 class BassProcessor : public BaseProcessor
 {
 public:
-    BassProcessor() : BaseProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true), bassSpecs(), bassPresets()) {}
+    BassProcessor() : BaseProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true), bassSpecs(), bassPresets()) { setFrenchPresets (bassFrenchPresets()); }
     const juce::String getName() const override { return BOY_NAME; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }

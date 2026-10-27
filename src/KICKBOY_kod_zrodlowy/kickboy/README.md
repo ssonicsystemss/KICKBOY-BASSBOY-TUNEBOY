@@ -20,6 +20,12 @@ Instrument VST3. Wpisz nuty w piano rollu – każda nuta to kick.
 - Wspólne dla serii BOY: **MY PRESETS**, **RANDOMIZE** z cofaniem (strzałka obok), **Freeze** i **Create automation clip**
   pod prawym klikiem – patrz niżej.
 
+## Tryb FRENCHCORE (180+ BPM)
+Wybierz motyw **Virtual Boy** (klik w nazwę presetu → THEME) – tryb włącza się sam (znaczek FRENCHCORE u góry). Można go też włączyć / wyłączyć
+ręcznie w tym samym menu („FRENCHCORE mode”). Brzmienie, które masz, **nie zmienia się** przy przełączeniu.
+- **Presety:** w trybie FRENCHCORE lista presetów to osobna paczka pod 180–200 BPM (nazwy zaczynają się od „FC”).
+- **RANDOMIZE:** losuje w węższym oknie wartości, które dobrze działają przy 180+ BPM: krótsze kicki (Length 130–260 ms, Release 5–50 ms), mocny przester (Hard / Fold / Crush / Raw, Drive 30–44 dB), wyższy Pitch Start (900–2200 Hz), ogon rumble jako część melodyczna.
+
 ## Wspólne dla KICKBOY / BASSBOY / TUNEBOY
 - **Nazwa presetu** (u góry): kliknij – presety fabryczne, **MY PRESETS** (twoje), „Save current sound…” (zapisz swój).
   Pliki: `Dokumenty\sonicsystems Presets\KICKBOY\`. Strzałki < > = poprzedni / następny preset.

@@ -30,6 +30,8 @@ struct Spec
     bool isInt = false;
     Ui ui = Ui::automatic;
     int icons = noIcons;
+    float frLo = 0, frHi = 0; bool frSet = false;   // RANDOMIZE window in FRENCHCORE mode (180+ BPM); not set = the normal range
+    Spec& fr (float lo, float hi) { frLo = lo; frHi = hi; frSet = true; return *this; }
     Spec& as (Ui u) { ui = u; return *this; }
     Spec& withIcons (int set) { icons = set; return *this; }
 };
@@ -112,25 +114,45 @@ public:
     const juce::String getProgramName (int) override { return presetName(); }
     void changeProgramName (int, const juce::String&) override {}
 
+    // ---- FRENCHCORE mode (180+ BPM): its own preset bank + a tighter RANDOMIZE window (Spec::fr). It follows the Virtual Boy
+    //      theme (choosing that theme switches it on, any other theme off) and can also be switched by hand in the theme menu.
+    //      A state property like the theme (not a parameter), so no parameter IDs change.
+    std::vector<Preset> frenchPresets;
+    void setFrenchPresets (std::vector<Preset> p) { frenchPresets = std::move (p); }
+    bool frenchcore() const { return (int) apvts.state.getProperty ("frenchcore", 0) != 0 && ! frenchPresets.empty(); }
+    void setFrenchcore (bool on)
+    {
+        if (on == frenchcore()) return;
+        apvts.state.setProperty ("frenchcore", on ? 1 : 0, nullptr);
+        apvts.state.setProperty ("presetIndex", -1, nullptr);   // the sound stays; the preset list and RANDOMIZE window change
+    }
+    const std::vector<Preset>& bank() const { return frenchcore() ? frenchPresets : presets; }   // the factory presets on offer now
+
     juce::String presetName() const { return apvts.state.getProperty ("presetName", presets.empty() ? "" : presets[0].name).toString(); }
     int themeIndex() const { return col::indexOf (apvts.state.getProperty ("theme", "screen").toString()); }
-    void setTheme (int idx) { apvts.state.setProperty ("theme", col::themes[juce::jlimit (0, col::numThemes - 1, idx)].id, nullptr); }
+    void setTheme (int idx)
+    {
+        idx = juce::jlimit (0, col::numThemes - 1, idx);
+        apvts.state.setProperty ("theme", col::themes[idx].id, nullptr);
+        setFrenchcore (juce::String (col::themes[idx].id) == "virtualboy");   // Virtual Boy = FRENCHCORE mode
+    }
     int presetIndex() const { return (int) apvts.state.getProperty ("presetIndex", 0); }   // -1 = user / random
 
     void applyPreset (int idx)
     {
-        if (! juce::isPositiveAndBelow (idx, (int) presets.size())) return;
+        const auto& list = bank();
+        if (! juce::isPositiveAndBelow (idx, (int) list.size())) return;
         for (auto& sp : specs)
             if (! sp.id.startsWith ("own"))   // OWN SOUND belongs to the user, not to the preset
                 setParam (sp.id, sp.def);
-        for (auto& kv : presets[(size_t) idx].values) setParam (kv.first, kv.second);
+        for (auto& kv : list[(size_t) idx].values) setParam (kv.first, kv.second);
         apvts.state.setProperty ("presetIndex", idx, nullptr);
-        apvts.state.setProperty ("presetName", presets[(size_t) idx].name, nullptr);
+        apvts.state.setProperty ("presetName", list[(size_t) idx].name, nullptr);
         presetChanged();
     }
     void stepPreset (int d)
     {
-        const int n = (int) presets.size();
+        const int n = (int) bank().size();
         if (n > 0) applyPreset (((presetIndex() < 0 ? 0 : presetIndex()) + d + n) % n);
     }
 
@@ -141,9 +163,11 @@ public:
         pushUndo();
         for (auto& sp : specs)
         {
-            if (sp.rndMin == sp.rndMax || isFrozen (sp.id)) continue;
+            const bool fc = frenchcore() && sp.frSet;   // FRENCHCORE window when the mode is on and the parameter has one
+            const float lo = fc ? sp.frLo : sp.rndMin, hi = fc ? sp.frHi : sp.rndMax;
+            if (lo == hi || isFrozen (sp.id)) continue;
             const bool discrete = ! sp.choices.isEmpty() || sp.isInt;
-            std::uniform_real_distribution<float> d (discrete ? sp.rndMin - 0.499f : sp.rndMin, discrete ? sp.rndMax + 0.499f : sp.rndMax);
+            std::uniform_real_distribution<float> d (discrete ? lo - 0.499f : lo, discrete ? hi + 0.499f : hi);
             float v = d (rng);
             if (discrete) v = std::round (v);
             setParam (sp.id, v);
@@ -211,6 +235,7 @@ public:
         auto st = apvts.copyState();
         st.removeProperty ("frozen", nullptr);
         st.removeProperty ("theme", nullptr);   // the look is yours, not part of a sound
+        st.removeProperty ("frenchcore", nullptr);
         st.removeProperty ("uiScale", nullptr);
         auto x = st.createXml();
         return x != nullptr && x->writeTo (userFolder().getChildFile (clean + ".boypreset"));
@@ -222,10 +247,12 @@ public:
         pushUndo();
         const auto frozen = apvts.state.getProperty ("frozen");   // your freeze marks stay
         const auto theme = apvts.state.getProperty ("theme");
+        const auto frenchKept = apvts.state.getProperty ("frenchcore");
         const auto uiScaleKept = apvts.state.getProperty ("uiScale");
         loadXml (*x);
         apvts.state.setProperty ("frozen", frozen, nullptr);
         apvts.state.setProperty ("theme", theme, nullptr);
+        apvts.state.setProperty ("frenchcore", frenchKept, nullptr);
         apvts.state.setProperty ("uiScale", uiScaleKept, nullptr);
         apvts.state.setProperty ("presetIndex", -1, nullptr);
         apvts.state.setProperty ("presetName", f.getFileNameWithoutExtension(), nullptr);

@@ -20,6 +20,7 @@ compiled:
 - **TUNEBOY 2.2:** edit the melody in the roll (drag notes, add, delete), **DRAW** a melody with the mouse, edit undo, copy / transpose a bar,
   16 + Custom + 10 more chord progressions, 9 scales, 14 rhythms, **CHORD STYLE** (held / offbeat / arp / gate), **PUMP** (built-in sidechain duck),
   **OWN SOUND** (your own sample plays the notes), a bank of 24 synth sounds + **NEW SOUND** (random). RANDOMIZE no longer touches the sound.
+- **FRENCHCORE mode (180+ BPM)** in all three: switches on with the Virtual Boy theme (or by hand in the theme menu) and gives each plugin its own preset bank and a tighter RANDOMIZE window for 180-200 BPM.
 - **All three:** resizable windows (drag the corner; the size is remembered), four colour themes.
 
 ## Themes

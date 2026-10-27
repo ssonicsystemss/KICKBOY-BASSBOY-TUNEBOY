@@ -266,15 +266,15 @@ std::vector<Spec> tuneSpecs()
 {
     std::vector<Spec> s {
         C ("key",    "Key",       keyNames, 9, true, false),
-        C ("scale",  "Scale",     { "Minor", "Harmonic Minor", "Phrygian", "Dorian", "Melodic Minor", "Major", "Phrygian Dominant", "Hungarian Minor", "Lydian" }, 0, true),
-        C ("prog",   "Progression", progNames, 0, true),
+        C ("scale",  "Scale",     { "Minor", "Harmonic Minor", "Phrygian", "Dorian", "Melodic Minor", "Major", "Phrygian Dominant", "Hungarian Minor", "Lydian" }, 0, true).fr (0, 2),
+        C ("prog",   "Progression", progNames, 0, true).fr (0, 7),
         C ("bars",   "Bars",      { "4", "8", "16" }, 1, true, false),
-        C ("rhythm", "Rhythm",    rhythmNames, 1, true),
-        P ("density","Density",   0, 1, 0.6f, true, 0.35f, 0.9f),
-        I ("octave", "Octave",    3, 6, 5, true, 4, 5),
-        I ("range",  "Range",     3, 12, 7, true, 4, 9, "deg"),
+        C ("rhythm", "Rhythm",    rhythmNames, 1, true).fr (0, 4),
+        P ("density","Density",   0, 1, 0.6f, true, 0.35f, 0.9f).fr (0.3f, 0.65f),
+        I ("octave", "Octave",    3, 6, 5, true, 4, 5).fr (4, 5),
+        I ("range",  "Range",     3, 12, 7, true, 4, 9, "deg").fr (4, 8),
         I ("seed",   "Seed",      1, 9999, 1, true, 1, 9999),
-        P ("chords", "Chords",    0, 1, 0.35f, true, 0.2f, 0.5f),
+        P ("chords", "Chords",    0, 1, 0.35f, true, 0.2f, 0.5f).fr (0.25f, 0.5f),
         P ("reverb", "Reverb",    0, 1, 0.35f, true, 0.35f, 0.35f),
         P ("out",    "Output",    -24, 6, -6, true, -6, -6, "dB"),
         // ADVANCED (synth)
@@ -310,6 +310,25 @@ std::vector<Spec> tuneSpecs()
 const char* const soundIds[] = { "detune", "width", "cutoff", "reso", "fenv", "attack", "decay", "sustain", "release", "rsize" };
 const float soundLo[] = { 10, 0.5f, 3000, 0.6f, 0.5f, 1, 200, 0.5f, 120, 0.6f };   // NEW SOUND picks inside these ranges
 const float soundHi[] = { 35, 0.9f, 10000, 1.4f, 2.0f, 20, 900, 0.9f, 500, 0.9f };
+// FRENCHCORE mode (180+ BPM, on with the Virtual Boy theme): sparse hypnotic melodies (long / dotted rhythms), fast attacks, short releases,
+// a small room, PUMP on. A beat at 190 BPM is ~315 ms, so nothing rings across the next kick.
+const float soundLoFc[] = { 20, 0.5f, 5000, 0.8f, 1.0f, 1, 150, 0.4f, 80, 0.3f };   // NEW SOUND in FRENCHCORE mode
+const float soundHiFc[] = { 45, 0.9f, 12000, 2.2f, 3.0f, 6, 500, 0.8f, 250, 0.6f };
+std::vector<Preset> tuneFrenchPresets()
+{
+    return {
+        { "FC Hypnotic Lead",   { {"key",6},{"scale",1},{"prog",0},{"rhythm",3},{"seed",4101},{"density",0.45f},{"cutoff",9000},{"attack",2},{"decay",250},{"sustain",0.5f},{"release",120},{"detune",32},{"reverb",0.25f},{"rsize",0.5f},{"pump",0.5f},{"chordstyle",1} } },
+        { "FC Epic Anthem 190", { {"key",7},{"scale",7},{"prog",17},{"rhythm",1},{"seed",4202},{"density",0.5f},{"cutoff",8000},{"release",160},{"pump",0.45f},{"chords",0.4f},{"reverb",0.25f},{"rsize",0.55f} } },
+        { "FC Dark Phrygian",   { {"key",9},{"scale",2},{"prog",2},{"rhythm",4},{"seed",4303},{"density",0.4f},{"cutoff",5000},{"reso",1.6f},{"release",110},{"pump",0.55f},{"chordstyle",3},{"reverb",0.2f},{"rsize",0.4f} } },
+        { "FC Rave Stabs",      { {"key",4},{"scale",6},{"prog",18},{"rhythm",13},{"seed",4404},{"density",0.6f},{"decay",140},{"sustain",0.0f},{"release",90},{"cutoff",7000},{"chordstyle",1},{"pump",0.6f},{"reverb",0.2f},{"rsize",0.4f} } },
+        { "FC Arp Machine",     { {"key",9},{"scale",0},{"prog",20},{"rhythm",8},{"seed",4505},{"density",0.5f},{"chordstyle",2},{"decay",120},{"sustain",0.1f},{"release",80},{"cutoff",8500},{"pump",0.4f},{"chords",0.4f},{"reverb",0.2f},{"rsize",0.4f} } },
+        { "FC Emotional Break", { {"key",5},{"scale",1},{"prog",4},{"rhythm",3},{"seed",4606},{"density",0.35f},{"attack",60},{"release",300},{"reverb",0.45f},{"rsize",0.7f},{"pump",0.0f},{"cutoff",5500} } },
+        { "FC Raw Scream Lead", { {"key",1},{"scale",7},{"prog",22},{"rhythm",6},{"seed",4707},{"density",0.65f},{"cutoff",12000},{"reso",2.2f},{"detune",45},{"attack",1},{"release",100},{"pump",0.5f},{"reverb",0.2f},{"rsize",0.4f} } },
+        { "FC Kick-Lock Gate",  { {"key",11},{"scale",0},{"prog",0},{"rhythm",5},{"seed",4808},{"chordstyle",3},{"pump",0.65f},{"density",0.55f},{"release",90},{"reverb",0.2f},{"rsize",0.4f} } },
+        { "FC Wide Hymn",       { {"key",2},{"scale",8},{"prog",19},{"rhythm",3},{"seed",4909},{"attack",40},{"release",400},{"reverb",0.5f},{"rsize",0.75f},{"pump",0.35f},{"detune",38},{"width",0.95f} } },
+    };
+}
+
 std::vector<Preset> soundBank()
 {
     return {
@@ -384,7 +403,7 @@ class TuneProcessor : public BaseProcessor
 {
 public:
     TuneProcessor() : BaseProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true), tuneSpecs(), tunePresets())
-    { for (auto& l : locks) l.store (0); own.attach (apvts); }
+    { for (auto& l : locks) l.store (0); own.attach (apvts); setFrenchPresets (tuneFrenchPresets()); }
     const juce::String getName() const override { return BOY_NAME; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return true; }
@@ -498,7 +517,7 @@ public:
         {
             const auto* id = soundIds[k];
             if (isFrozen (id)) continue;
-            std::uniform_real_distribution<float> d (soundLo[k], soundHi[k]);
+            std::uniform_real_distribution<float> d (frenchcore() ? soundLoFc[k] : soundLo[k], frenchcore() ? soundHiFc[k] : soundHi[k]);
             setParam (id, d (rng));
         }
         apvts.state.setProperty ("soundName", "Random", nullptr);
@@ -579,7 +598,8 @@ public:
         }
         loopLen = gp.bars * 4.0;
 
-        double bpm = 150, hostPpq = 0; bool hostPlaying = false;
+        // no host tempo: 150 (FRENCHCORE mode: 190)
+        double bpm = frenchcore() ? 190.0 : 150.0, hostPpq = 0; bool hostPlaying = false;
         if (auto* ph = getPlayHead()) if (auto pos = ph->getPosition())
         { if (auto b = pos->getBpm()) if (std::isfinite (*b)) bpm = juce::jlimit (20.0, 999.0, *b);
           if (pos->getIsPlaying()) if (auto q = pos->getPpqPosition()) if (std::isfinite (*q)) { hostPlaying = true; hostPpq = *q; } }

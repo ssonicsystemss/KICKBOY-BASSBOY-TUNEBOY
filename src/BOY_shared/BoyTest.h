@@ -231,6 +231,42 @@ inline int testMain (int argc, char** argv, const String& kind, std::function<in
         f.deleteFile();
         std::printf ("  [%s] MY PRESETS save / load\n", ok ? "OK" : "FAIL"); fails += ok ? 0 : 1;
     }
+    {   // FRENCHCORE mode (180+ BPM): follows the Virtual Boy theme, own preset bank, RANDOMIZE inside its window, state kept
+        bool linked = ! bp->frenchcore();
+        bp->setTheme (3); linked = linked && bp->frenchcore();
+        bp->setTheme (0); linked = linked && ! bp->frenchcore();
+        bp->setTheme (3);
+        int presetsOk = 0; const int nfp = (int) bp->bank().size();
+        for (int i = 0; i < nfp; ++i)
+        {
+            bp->applyPreset (i);
+            auto r = render (*p, kind, secs, nullptr);
+            presetsOk += (! r.bad && r.rms > 0.005 && r.peak <= 1.0001 && bp->presetIndex() == i && (kind != "tune" || r.midiOut > 0)) ? 1 : 0;
+        }
+        bool inWindow = true, clean = true; int windows = 0;
+        for (int k = 0; k < 40; ++k)
+        {
+            bp->randomize();
+            for (auto& sp : bp->specs)
+                if (sp.frSet && ! bp->isFrozen (sp.id))
+                {
+                    const float v = bp->get (bp->indexOf (sp.id));
+                    inWindow = inWindow && v >= sp.frLo - 0.51f && v <= sp.frHi + 0.51f && (sp.frLo == sp.frHi || true);
+                    if (k == 0) ++windows;
+                }
+            if (k % 8 == 0) { auto r = render (*p, kind, secs * 0.5, nullptr); clean = clean && ! r.bad && r.peak <= 1.0001; }
+        }
+        bp->applyPreset (0);
+        MemoryBlock st; p->getStateInformation (st);
+        std::unique_ptr<AudioProcessor> q (createPluginFilter()); q->setStateInformation (st.getData(), (int) st.getSize());
+        const bool kept = dynamic_cast<boy::BaseProcessor*> (q.get())->frenchcore();
+        bp->setFrenchcore (false);
+        const bool ok = linked && nfp >= 6 && presetsOk == nfp && inWindow && windows >= 6 && clean && kept;
+        std::printf ("  [%s] FRENCHCORE: follows the Virtual Boy theme %s, %d/%d presets clean, RANDOMIZE inside %d windows %s, state %s\n", ok ? "OK" : "FAIL",
+                     linked ? "yes" : "NO", presetsOk, nfp, windows, inWindow ? "yes" : "NO", kept ? "kept" : "LOST");
+        fails += ok ? 0 : 1;
+        bp->setTheme (0); bp->applyPreset (0);
+    }
     if (extraChecks) fails += extraChecks (*bp);
     fails += robustness (kind);
     {   // RAM: 10 prepared instances, then one editor
