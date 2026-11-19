@@ -248,6 +248,130 @@ static int tuneChecks (boy::BaseProcessor& base)
         tp.applyPreset (0);
         if (! Sonic::ownSoundSelfTest<TuneProcessor> (44100.0, 256, 60, 1.2f)) ++fails;
     }
+    // 12) Phrase engine: 8 bars are a phrase, not one motif copied across. Classic stays what a legacy project loads.
+    {
+        tp.edits.clearAll();
+        for (int bar = 0; bar < 16; ++bar) if (tp.lockOf (bar) > 0) tp.toggleLock (bar);
+        tp.setFrenchcore (false);
+        const int seeds[] = { 1, 17, 101, 202, 777, 4101, 8888 };
+        const int rhythmsN[] = { 1, 0, 5, 6, 2, 4, 12 };
+        const int rhythmsF[] = { 5, 13, 6, 1, 12, 11, 10 };
+        int okN = 0, okF = 0;
+        auto analyse = [&] (bool fc, int rhythm, float density, int seed) {
+            tp.setFrenchcore (false);
+            tp.applyPreset (0);
+            tp.edits.clearAll();
+            tp.setParam ("bars", 1.0f);
+            tp.setParam ("engine", 1.0f);
+            tp.setParam ("scale", 0.0f);
+            tp.setParam ("prog", 0.0f);
+            tp.setParam ("octave", 5.0f);
+            tp.setParam ("range", 8.0f);
+            tp.setParam ("density", density);
+            tp.setParam ("rhythm", (float) rhythm);
+            tp.setParam ("seed", (float) seed);
+            tp.setParam ("variation", 0.0f);
+            tp.setParam ("chordstyle", 0.0f);
+            if (fc) tp.setFrenchcore (true);
+            const int n = tp.generateNow (a.data());
+            struct Ev { double st, len; int pitch, bar, step; };
+            std::vector<Ev> m;
+            for (int i = 0; i < n; ++i)
+            {
+                if (a[(size_t) i].chord || a[(size_t) i].start >= 32.0) continue;
+                const int bar = (int) (a[(size_t) i].start / 4.0);
+                const int step = (int) std::floor ((a[(size_t) i].start - bar * 4.0) / 0.25 + 0.5);
+                if (bar >= 0 && bar < 8) m.push_back ({ a[(size_t) i].start, a[(size_t) i].len, a[(size_t) i].pitch, bar, step });
+            }
+            uint16_t mask[8] = {};
+            for (auto& e : m) if (e.step >= 0 && e.step < 16) mask[e.bar] = (uint16_t) (mask[e.bar] | (1u << e.step));
+            int distinct = 0;
+            for (int i = 0; i < 8; ++i)
+            {
+                bool seen = false;
+                for (int j = 0; j < i; ++j) if (mask[j] == mask[i]) seen = true;
+                distinct += seen ? 0 : 1;
+            }
+            bool halves = false;
+            for (int i = 0; i < 4; ++i) if (mask[i] != mask[i + 4]) halves = true;
+            int mn = 127, mx = 0;
+            for (auto& e : m) { mn = std::min (mn, e.pitch); mx = std::max (mx, e.pitch); }
+            const int span = m.empty() ? 0 : mx - mn;
+            int leaps[2] = {};
+            for (size_t i = 1; i < m.size(); ++i)
+                if (std::abs (m[i].pitch - m[i - 1].pitch) > 7)
+                {
+                    const int g = m[i].bar / 4;
+                    if (g < 2) ++leaps[g];
+                }
+            int off = 0;
+            double gateSum = 0;
+            for (size_t i = 0; i < m.size(); ++i)
+            {
+                double gap = (i + 1 < m.size()) ? m[i + 1].st - m[i].st : 0.5;
+                if (gap < 1.0e-6) gap = 0.5;
+                gateSum += m[i].len / gap;
+                if (m[i].step % 4 != 0) ++off;
+            }
+            const double meanGate = m.empty() ? 1.0 : gateSum / (double) m.size();
+            const double offFrac = m.empty() ? 0.0 : (double) off / (double) m.size();
+            bool ok = (int) m.size() >= 8 && distinct >= 4 && halves && span >= 7 && span <= 19 && leaps[0] <= 2 && leaps[1] <= 2;
+            if (fc) ok = ok && offFrac >= 0.35 && meanGate < 0.8;
+            if (! ok)
+                std::printf ("    seed %d %s rhythm %d: notes %d distinct %d halves %d span %d leaps %d/%d off %.2f gate %.2f\n",
+                             seed, fc ? "FC" : "normal", rhythm, (int) m.size(), distinct, halves ? 1 : 0, span, leaps[0], leaps[1], offFrac, meanGate);
+            return ok;
+        };
+        for (int i = 0; i < 7; ++i)
+        {
+            okN += analyse (false, rhythmsN[i], 0.65f, seeds[i]) ? 1 : 0;
+            okF += analyse (true, rhythmsF[i], 0.75f, seeds[i]) ? 1 : 0;
+        }
+        // legacy project: no engine parameter and no marker -> Classic, and that matches engine 0 note for note
+        tp.setFrenchcore (false);
+        tp.applyPreset (0);
+        tp.setParam ("seed", 202.0f);
+        tp.setParam ("variation", 0.0f);
+        tp.setParam ("engine", 0.0f);
+        const int nClassic = tp.generateNow (a.data());
+        tp.setParam ("engine", 1.0f);
+        tp.reloadAsLegacyProject();
+        const int nLegacy = tp.generateNow (b.data());
+        bool same = std::abs (tp.get (engineI)) < 0.01f && nClassic == nLegacy;
+        for (int i = 0; i < nClassic && same; ++i)
+            same = a[(size_t) i].pitch == b[(size_t) i].pitch && a[(size_t) i].start == b[(size_t) i].start
+                && std::abs (a[(size_t) i].len - b[(size_t) i].len) < 1.0e-9 && std::abs (a[(size_t) i].vel - b[(size_t) i].vel) < 1.0e-6f
+                && a[(size_t) i].chord == b[(size_t) i].chord;
+        TuneProcessor fresh;
+        const bool freshPhrase = std::abs (fresh.get (engineI) - 1.0f) < 0.01f;
+        tp.setFrenchcore (true);
+        tp.applyPreset (0);
+        const bool fcPhrase = std::abs (tp.get (engineI) - 1.0f) < 0.01f;
+        tp.setFrenchcore (false);
+        tp.applyPreset (0);
+        tp.setParam ("engine", 1.0f);
+        tp.setParam ("bars", 1.0f);
+        tp.setParam ("seed", 101.0f);
+        tp.hostBpm.store (150.0);
+        const auto midN = File::getCurrentWorkingDirectory().getChildFile ("phrase_normal.mid");
+        const bool wroteN = tp.writeMidiFile (midN);
+        tp.setFrenchcore (true);
+        tp.setParam ("rhythm", 13.0f);
+        tp.setParam ("density", 0.75f);
+        tp.setParam ("scale", 1.0f);
+        tp.setParam ("seed", 4404.0f);
+        tp.hostBpm.store (190.0);
+        const auto midF = File::getCurrentWorkingDirectory().getChildFile ("phrase_frenchcore.mid");
+        const bool wroteF = tp.writeMidiFile (midF);
+        tp.setFrenchcore (false);
+        tp.applyPreset (0);
+        const bool pass = okN == 7 && okF == 7 && same && freshPhrase && fcPhrase;
+        std::printf ("  [%s] phrase engine: normal %d/7, FRENCHCORE %d/7, legacy->Classic %s, new instance Phrase %s, FC preset Phrase %s\n",
+                     pass ? "OK" : "FAIL", okN, okF, same ? "yes" : "NO", freshPhrase ? "yes" : "NO", fcPhrase ? "yes" : "NO");
+        if (wroteN || wroteF)
+            std::printf ("  MIDI examples: %s %s, %s %s\n", wroteN ? "wrote" : "FAILED", midN.getFullPathName().toRawUTF8(), wroteF ? "wrote" : "FAILED", midF.getFullPathName().toRawUTF8());
+        fails += pass ? 0 : 1;
+    }
     return fails;
 }
 

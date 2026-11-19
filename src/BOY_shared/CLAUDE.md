@@ -43,7 +43,11 @@ VST3 only (no CLAP / Standalone: smallest footprint). Parameter IDs frozen; add 
 - TUNEBOY: real-cents detune; resume sounding notes on key change (both modes); a change while playing applies at the
   next bar line; VARIATION (`variation`, hidden param) + bar locks (state property `locks`, lock code = 1 + seed +
   10000 * variation); 10 rhythms; tempo + track names in the .mid; hero = roll with playhead, click bar numbers = lock.
-  Mode (`mode`, last param, main page): Melody / Single Note (2026-10-21: the keys sound as plain polyphonic notes, no generator, no MIDI out).
+  Mode (`mode`, main page): Melody / Single Note (2026-10-21: the keys sound as plain polyphonic notes, no generator, no MIDI out).
+  Engine (`engine`, last param, ADVANCED): Classic / Phrase. Classic is the pre-phrase generator, bit-identical; a project saved
+  before the parameter loads as Classic (`melodyEngine` state marker missing → stateLoaded). New instances and FRENCHCORE presets
+  use Phrase (4-bar call / answer / sequence / cadence, voice leading, one climax per 8 bars; FRENCHCORE = short stab gates and
+  offbeat weight). FRENCHCORE RANDOMIZE draws stab rhythms at a higher density, not Long Notes.
 
 ## Test
 `<X>Render demo.wav gui.png` must print `RESULT: PASS` (build_all runs it). Also writes `gui_advanced.png`.

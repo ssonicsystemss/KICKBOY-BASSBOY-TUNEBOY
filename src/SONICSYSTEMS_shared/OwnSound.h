@@ -36,7 +36,8 @@ public:
         int rootNote = 60;       // the note that plays the sample at its own pitch (C5 in FL) when it follows notes
         bool reverse = false;    // plays the sample backwards (warpback: a reverse bass that ends on the kick)
     };
-    explicit OwnSound (Config c = {}) : cfg (c) {}
+    OwnSound();
+    explicit OwnSound (Config c);
 
     // note-off ends the sound (25 ms fade) - e.g. synths, or a kick in Note End = CUT. The processor may change it
     // every block (audio thread only).
@@ -157,7 +158,7 @@ public:
             {
                 const int a = (int) (len * i / points), b = juce::jmax (a + 1, (int) (len * (i + 1) / points));
                 for (int ch = 0; ch < d.getNumChannels(); ++ch)
-                    out[(size_t) i] = juce::jmax (out[(size_t) i], d.getMagnitude (ch, a, (int) juce::jmin<juce::int64> (b, len) - a));
+                    out[(size_t) i] = juce::jmax (out[(size_t) i], d.getMagnitude (ch, a, (int) std::min<juce::int64> ((juce::int64) b, len) - a));
             }
         }
         const float top = *std::max_element (out.begin(), out.end());
@@ -229,7 +230,7 @@ private:
 
     std::unique_ptr<Sample> readAll (juce::AudioFormatReader& r, const juce::String& name) const
     {
-        const auto len = (int) juce::jmin<juce::int64> (r.lengthInSamples, (juce::int64) (maxSeconds * r.sampleRate));
+        const auto len = (int) std::min<juce::int64> (r.lengthInSamples, (juce::int64) (maxSeconds * r.sampleRate));
         const int ch = r.numChannels > 1 ? 2 : 1;
         auto s = std::make_unique<Sample>();
         s->data.setSize (ch, len);
@@ -369,4 +370,8 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE (OwnSound)
 };
+
+// Defined out of line: GCC will not use Config's default member initialisers while OwnSound is still open.
+inline OwnSound::OwnSound() : OwnSound (Config { true, 60, false }) {}
+inline OwnSound::OwnSound (Config c) : cfg (c) {}
 }

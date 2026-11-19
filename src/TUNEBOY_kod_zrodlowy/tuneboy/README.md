@@ -50,9 +50,10 @@ inne nuty = transpozycja). Najprościej: narysuj jedną długą nutę C5 na 4 / 
 
 ## Tryb FRENCHCORE (180+ BPM)
 Wybierz motyw **Virtual Boy** (klik w nazwę presetu → THEME) – tryb włącza się sam (znaczek FRENCHCORE u góry). Można go też włączyć / wyłączyć
-ręcznie w tym samym menu („FRENCHCORE mode”). Brzmienie, które masz, **nie zmienia się** przy przełączeniu.
-- **Presety:** w trybie FRENCHCORE lista presetów to osobna paczka pod 180–200 BPM (nazwy zaczynają się od „FC”).
-- **RANDOMIZE:** losuje w węższym oknie wartości, które dobrze działają przy 180+ BPM: rzadsze, hipnotyczne melodie (Density 0.3–0.65, rytmy Straight / Syncopated / Euphoric / Long / Dotted, skale Minor / Harmonic / Phrygian), krótkie releasy, mały pogłos. NEW SOUND też losuje szybkie brzmienia. Bez tempa z hosta TUNEBOY gra 190 BPM.
+ręcznie w tym samym menu („FRENCHCORE mode”). Sam syntezator (cutoff, detune, pogłos) **nie przeskakuje** przy przełączeniu.
+- **Presety:** w trybie FRENCHCORE lista presetów to osobna paczka pod 180–200 BPM (nazwy zaczynają się od „FC”): krótkie, akcentowane leady w moll (offbeat, gallop, hoover, pickup), nie długie równe nuty.
+- **RANDOMIZE:** gęstsze melodie pod 180+ BPM (Density około 0.58–0.9), rytmy ze stabami i synkopą (bez Long Notes i Half-time), skale molowe. NEW SOUND nadal losuje szybkie brzmienia. Bez tempa z hosta TUNEBOY gra 190 BPM.
+- **ENGINE** (strona ADVANCED): **Phrase** układa frazy 4-taktowe (pytanie, odpowiedź, sekwencja, kadencja z wejściem), prowadzi głos i ma jeden szczyt na 8 taktów. W FRENCHCORE nuty są krótkie, z przerwami i offbeatem. **Classic** to poprzedni generator. Nowa instancja i presety FC startują na Phrase. Stary projekt, zapisany zanim ten parametr istniał, otwiera się na Classic i brzmi tak samo jak wcześniej.
 
 ## Wspólne dla serii BOY
 Presety + **MY PRESETS** (klik w nazwę), **RANDOMIZE** + **↶** cofnij, prawy klik: *Create automation clip* / *Freeze* /
