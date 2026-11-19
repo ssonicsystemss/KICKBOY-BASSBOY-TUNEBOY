@@ -172,6 +172,7 @@ inline int testMain (int argc, char** argv, const String& kind, std::function<in
     int fails = 0; double maxCpu = 0;
     std::printf ("== %s : %d presets, %d params\n", p->getName().toRawUTF8(), (int) bp->presets.size(), (int) p->getParameters().size());
     const double secs = kind == "tune" ? 12.8 : 3.2;
+    bp->setFrenchcore (false);   // factory-preset loop is the normal bank; TUNEBOY opens in FRENCHCORE with Virtual Boy
     for (int i = 0; i < (int) bp->presets.size(); ++i)
     {
         bp->applyPreset (i);
@@ -232,6 +233,7 @@ inline int testMain (int argc, char** argv, const String& kind, std::function<in
         std::printf ("  [%s] MY PRESETS save / load\n", ok ? "OK" : "FAIL"); fails += ok ? 0 : 1;
     }
     {   // FRENCHCORE mode (180+ BPM): follows the Virtual Boy theme, own preset bank, RANDOMIZE inside its window, state kept
+        bp->setTheme (0);   // TUNEBOY starts on Virtual Boy; the link is what this checks, not the startup theme
         bool linked = ! bp->frenchcore();
         bp->setTheme (3); linked = linked && bp->frenchcore();
         bp->setTheme (0); linked = linked && ! bp->frenchcore();

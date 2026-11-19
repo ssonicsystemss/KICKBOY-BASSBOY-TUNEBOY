@@ -48,6 +48,9 @@ VST3 only (no CLAP / Standalone: smallest footprint). Parameter IDs frozen; add 
   before the parameter loads as Classic (`melodyEngine` state marker missing → stateLoaded). New instances and FRENCHCORE presets
   use Phrase (4-bar call / answer / sequence / cadence, voice leading, one climax per 8 bars; FRENCHCORE = short stab gates and
   offbeat weight). FRENCHCORE RANDOMIZE draws stab rhythms at a higher density, not Long Notes.
+  Variety (`variety`, after engine): Tight = that Phrase, Wide = A/A'/B/A'' (new instances). A project without the
+  parameter loads Tight. Epic (`epic`, last param): symphonic 16-bar theme + counter line under the chords; Classic ignores it.
+  New TUNEBOY instances open on the Virtual Boy theme (constructor `setTheme(3)`); a theme stored in the project is kept.
 
 ## Test
 `<X>Render demo.wav gui.png` must print `RESULT: PASS` (build_all runs it). Also writes `gui_advanced.png`.

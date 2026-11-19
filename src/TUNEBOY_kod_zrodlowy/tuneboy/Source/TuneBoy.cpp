@@ -89,7 +89,7 @@ const juce::StringArray rhythmNames { "Straight 1/8", "Syncopated", "Euphoric 1/
                                       "Reverse Gallop", "Sparse Offbeat", "Pickup Anthem", "Hoover Stabs" };
 constexpr int numRhythms = 14;
 
-struct GenParams { int key, scale, prog, bars, rhythm, octave, range, seed, variation; float density; std::array<int, 16> locks; std::array<int, 4> cust; int chordStyle; int engine; int french; };
+struct GenParams { int key, scale, prog, bars, rhythm, octave, range, seed, variation; float density; std::array<int, 16> locks; std::array<int, 4> cust; int chordStyle; int engine; int french; int variety; int epic; };
 struct Note { double start, len; int pitch; float vel; bool chord; };
 constexpr int maxNotes = 1024;
 
@@ -359,7 +359,7 @@ void repairPhraseMasks (uint16_t* m, int bars, bool french)
     }
 }
 
-struct PhraseEv { int bar, step, pitch; bool accent, climax, pickup; };
+struct PhraseEv { int bar, step, pitch; bool accent, climax, pickup, pad; float gate; }; // gate 0 = the engine's default length; pad = counter line (played with the chords)
 
 int nearestScalePitch (int target, const int* sc, int root)
 {
@@ -564,6 +564,213 @@ void fillPhrase (const GenParams& g, int seed, int variation, uint16_t* masks, P
     }
 }
 
+// Wider Phrase (variety > 0). The original fillPhrase is left alone so a saved project with Variety = Tight
+// (or a state from before this parameter) stays note-for-note. Form over 8 bars is A A' B A'', not one 4-bar loop.
+// The seed picks the cell, the transform and the contour, so two RANDOMIZE results do not share a shape.
+void fillRich (const GenParams& g, int seed, int variation, uint16_t* masks, PhraseEv* ev, int& ne)
+{
+    const int bars = g.bars;
+    const bool french = g.french != 0;
+    const int rhythm = juce::jlimit (0, numRhythms - 1, g.rhythm);
+    const float* tplt = rhythmTpl[rhythm];
+    const int* sc = scales[juce::jlimit (0, numScales - 1, g.scale)];
+    const int* pr = g.prog == customProg ? g.cust.data() : g.prog > customProg ? extraProgs[juce::jlimit (0, numExtraProgs - 1, g.prog - customProg - 1)]
+                                                                                 : progs[juce::jlimit (0, numProgs - 1, g.prog)];
+    const int root = 12 * (g.octave + 1) + g.key;
+    const int barsPerChord = bars >= 16 ? 2 : 1;
+    const int plan = (seed / 3) % 5;
+    static const uint16_t cells[6] = { 0xAAAA, 0x9249, 0x4924, 0xA492, 0x9999, 0x8421 }; // 8ths, 3-3-2, offbeat, dotted, gallop, sparse
+    uint16_t motif = 0;
+    for (int s = 0; s < 16; ++s) if (tplt[s] >= 0.85f) motif = (uint16_t) (motif | (1u << s));
+    motif = (uint16_t) (motif | (cells[(seed * 3 + 1) % 6] & 0x6666u));
+    if (french) motif = (uint16_t) (motif | 0x4444u);   // the "ands", so frenchcore stays off the beat
+    if (motif == 0) motif = french ? 0x4444u : 0x1111u;
+    auto xform = [] (uint16_t m, int kind) -> uint16_t
+    {
+        if (kind == 1) return (uint16_t) (((m << 1) | (m >> 15)) & 0xFFFFu);          // displaced (sequence)
+        if (kind == 2) { uint16_t r = 0; for (int s = 0; s < 16; ++s) if (m & (1u << s)) r = (uint16_t) (r | (1u << (15 - s))); return r; } // retrograde
+        if (kind == 3) return (uint16_t) ((m ^ 0x2222u) | (m & 0x1111u));              // flip the offbeats, keep the beats
+        if (kind == 4) return (uint16_t) ((m & 0x1111u) | 0x0101u);                    // augmentation: quarters
+        return m;
+    };
+    // A A' B A''  (and a developed second 8 that is not the same transforms)
+    static const int formA[5][8] = {
+        { 0, 0, 1, 1, 2, 2, 3, 4 },
+        { 0, 0, 1, 3, 2, 4, 1, 4 },
+        { 0, 1, 0, 3, 2, 2, 4, 4 },
+        { 0, 0, 3, 1, 4, 2, 1, 4 },
+        { 0, 3, 1, 1, 2, 4, 3, 4 },
+    };
+    const int* form = formA[plan];
+    for (int b = 0; b < bars; ++b)
+    {
+        int kind = form[b % 8];
+        if (b >= 8) kind = (kind + 2 + (seed % 2)) % 5;
+        masks[b] = xform (motif, kind);
+        if ((b % 8) == 7) masks[b] = (uint16_t) ((masks[b] & ~0x1F00u) | 0xE000u);   // cadence pickup
+        if (((seed + b) % 3) == 0)                                                     // grace into the next beat
+        {
+            if (masks[b] & (1u << 4)) masks[b] = (uint16_t) (masks[b] | (1u << 3));
+            if (masks[b] & (1u << 8)) masks[b] = (uint16_t) (masks[b] | (1u << 7));
+        }
+        if (masks[b] == 0) masks[b] = motif;
+    }
+    if (variation > 0 && bars > 0)
+    {
+        const int first = lowestStep (masks[0]);
+        masks[0] = (uint16_t) ((masks[0] & ~((1u << first) - 1u)) | (1u << first));
+    }
+    repairPhraseMasks (masks, bars, french);
+    if (variation > 0 && bars > 1) { masks[1] = (uint16_t) (masks[1] ^ (1u << 7)); if (masks[1] == 0) masks[1] = (uint16_t) (1u << 7); }
+    static const int contour[5][8] = {
+        { 0, 2, 4, 5,  7, 9, 8, 12 },
+        { 0, 3, 7, 4,  2, 5, 10, 12 },
+        { 5, 7, 4, 2,  0, 3, 8, 12 },
+        { 0, 0, 3, 5,  8, 10, 7, 12 },
+        { 2, 4, 7, 5,  9, 12, 8, 11 },
+    };
+    const int* shape = contour[plan];
+    const int color = (g.scale == 2 || g.scale == 6) ? 1 : (g.scale == 1 ? 11 : 0); // phrygian leans on b2; harmonic minor cadences via the leading tone
+    ne = 0;
+    int motifPitch[16] = {}, motifN = 0;
+    for (int b = 0; b < bars; ++b)
+    {
+        int steps[16], ns = 0;
+        for (int s = 0; s < 16; ++s) if (masks[b] & (1u << s)) steps[ns++] = s;
+        if (ns == 0 || ne >= 240) continue;
+        int anch = shape[b % 8];
+        if (b >= 8) anch = juce::jlimit (0, 12, anch + ((seed % 2) ? 3 : -2));
+        if (color == 1 && anch == 0) anch = 1;
+        if (color == 11 && (b % 8) == 6) anch = 11;
+        const int section = b % 8;
+        const int chord = pr[(b / barsPerChord) % 4];
+        const bool offbeatTpl = tplt[0] < 0.5f && tplt[8] < 0.5f;
+        for (int i = 0; i < ns && ne < 256; ++i)
+        {
+            const int s = steps[i];
+            int target = root + anch;
+            if (b % 8 == 0)
+            {
+                const float t = ns == 1 ? 0.0f : (float) i / (float) (ns - 1);
+                const int arch = (i == 0 || i == ns - 1) ? 0 : (int) std::round (std::sin (t * 3.14159f) * 3.0f);
+                target = root + arch + (color == 1 && i == 0 ? 1 : 0);
+            }
+            else if (motifN > 0)
+            {
+                const int src = juce::jmin (motifN - 1, i);
+                int off = motifPitch[src] - motifPitch[0];
+                if (section >= 2 && section <= 3) off += 2 + (plan % 3);             // A' sequence up
+                if (section >= 4 && section <= 5 && (plan % 2) == 0) off = -off;    // B inversion
+                if (section >= 4 && section <= 5 && (plan % 2) == 1) off = motifPitch[motifN - 1 - src] - motifPitch[0]; // B retrograde
+                if (section == 6) off += (i % 2 == 0 ? 0 : 2);                        // neighbor / turn
+                if (b >= 8) off += (seed % 2) ? 3 : -2;
+                target = motifPitch[0] + off + (anch - shape[0]);
+            }
+            const bool jump = plan == 2 && b % 8 == 4 && i == 0;
+            if (! jump) target = juce::jlimit (root - 2, root + 16, target);
+            int pitch = nearestScalePitch (target, sc, root);
+            if (ne > 0 && ! jump && std::abs (pitch - ev[ne - 1].pitch) > 5)
+                pitch = nearestScalePitch (ev[ne - 1].pitch + (pitch > ev[ne - 1].pitch ? 4 : -4), sc, root);
+            if (b % 8 == 0 && i == 0) pitch = nearestScalePitch (root + (color == 1 ? 1 : 0), sc, root);
+            const bool accent = tplt[s] >= 0.85f || (offbeatTpl ? (s % 4 == 2) : (s % 4 == 0));
+            if (accent)
+            {
+                const int ct = nearestChordPitch (pitch, chord, sc, root);
+                if (std::abs (ct - pitch) <= 4 && (ne == 0 || std::abs (ct - ev[ne - 1].pitch) <= (jump ? 12 : 7))) pitch = ct;
+            }
+            const bool grace = (s == 3 || s == 7) && ((seed + b) % 3) == 0;
+            float gate = grace ? 0.38f : (accent ? 0.92f : (s % 3 == 0 ? 0.78f : 0.58f));
+            ev[ne++] = { b, s, pitch, accent, false, (b % 8) == 7 && s >= 13, false, gate };
+            if (b % 8 == 0 && motifN < 16) motifPitch[motifN++] = pitch;
+        }
+    }
+    if (ne > 0)
+    {
+        int ci = ne - 1;
+        for (int i = 0; i < ne; ++i) if ((ev[i].bar % 8) == 7) ci = i;
+        ev[ci].pitch = nearestScalePitch (root + 12, sc, root);
+        ev[ci].climax = true;
+        const int peak = ev[ci].pitch;
+        for (int i = 0; i < ne; ++i) if (i != ci && ev[i].pitch >= peak) ev[i].pitch = nearestScalePitch (peak - 2, sc, root);
+        int budget[4] = { 2, 2, 2, 2 };
+        for (int i = 1; i < ne; ++i)
+        {
+            const int diff = ev[i].pitch - ev[i - 1].pitch, grp = juce::jmin (3, ev[i].bar / 4);
+            if (std::abs (diff) <= 7) continue;
+            if (budget[grp] > 0) { --budget[grp]; continue; }
+            const int sign = diff > 0 ? 1 : -1;
+            ev[i].pitch = nearestScalePitch (ev[i - 1].pitch + sign * 5, sc, root);
+            if (std::abs (ev[i].pitch - ev[i - 1].pitch) > 7) ev[i].pitch = ev[i - 1].pitch + sign * 5;
+        }
+        int mn = ev[0].pitch, mx = ev[0].pitch;
+        for (int i = 1; i < ne; ++i) { mn = juce::jmin (mn, ev[i].pitch); mx = juce::jmax (mx, ev[i].pitch); }
+        if (mx - mn < 7) ev[ci].pitch = mn + 9;
+        if (ev[ci].pitch - mn > 19) ev[ci].pitch = mn + 16;
+        for (int i = 0; i < ne; ++i) if (ev[i].pitch > mn + 19) ev[i].pitch -= 12;
+    }
+}
+
+// Epic / symphonic: long soaring line, a 16-bar build → climax → lift, a slower counter-melody under it.
+// The chord pad follows (generatePhrase). A Picardy third and a 4th-up lift are applied there on the last section.
+void fillEpic (const GenParams& g, int seed, int variation, uint16_t* masks, PhraseEv* ev, int& ne)
+{
+    const int bars = g.bars;
+    const int* sc = scales[juce::jlimit (0, numScales - 1, g.scale)];
+    const int* pr = g.prog == customProg ? g.cust.data() : g.prog > customProg ? extraProgs[juce::jlimit (0, numExtraProgs - 1, g.prog - customProg - 1)]
+                                                                                 : progs[juce::jlimit (0, numProgs - 1, g.prog)];
+    const int root = 12 * (g.octave + 1) + g.key;
+    const int barsPerChord = bars >= 16 ? 2 : 1;
+    const int liftAt = bars >= 16 ? 12 : (bars >= 8 ? 6 : bars - 1);
+    static const uint16_t longCell[4] = { 0x1111u, 0x0141u, 0x1041u, 0x4101u }; // quarters, dotted, held + pickup, half notes
+    for (int b = 0; b < bars; ++b)
+    {
+        const int part = b < bars / 2 ? 0 : (b < liftAt ? 1 : 2);
+        masks[b] = longCell[part == 2 ? 3 : (part == 1 ? 2 : (b % 2))];
+        if ((b % 4) == 3) masks[b] = (uint16_t) (masks[b] | 0xE000u);             // rising pickup into the next phrase
+        if (b == bars - 1) masks[b] = (uint16_t) (0x0001u | 0xE000u);             // climax note, then a cadence
+        if (variation > 0 && b == 1) masks[b] = (uint16_t) (masks[b] | (1u << 6));
+        if (masks[b] == 0) masks[b] = 0x0101u;
+    }
+    // statement, sequence, wide B, lift. Semitones above the (local) tonic.
+    static const int arc16[16] = { 0, 2, 4, 3,  7, 8, 10, 7,  12, 10, 14, 12,  7, 10, 12, 0 };
+    static const int arc8[8] = { 0, 3, 7, 5,  10, 12, 15, 7 };
+    ne = 0;
+    int prev = root;
+    for (int b = 0; b < bars && ne < 200; ++b)
+    {
+        const bool lift = b >= liftAt;
+        const int localRoot = root + (lift ? 5 : 0);   // key-change lift of a 4th
+        int anch = bars >= 16 ? arc16[b] : arc8[b % 8];
+        if (bars < 8) anch = (b % 4) * 3;
+        if (g.scale == 2 || g.scale == 6) anch += (b % 4 == 0 ? 1 : 0);           // phrygian b2 on the phrase starts
+        int steps[16], ns = 0;
+        for (int s = 0; s < 16; ++s) if (masks[b] & (1u << s)) steps[ns++] = s;
+        const int chord = pr[(b / barsPerChord) % 4];
+        for (int i = 0; i < ns && ne < 240; ++i)
+        {
+            const int s = steps[i];
+            const bool climax = b == bars - 1 && i == 0;
+            int target = localRoot + (climax ? 12 : anch);
+            if (! climax && i > 0) target = prev + juce::jlimit (-7, 9, (localRoot + anch) - prev);
+            int pitch = nearestScalePitch (target, sc, localRoot);
+            if (s % 4 == 0)
+            {
+                const int ct = nearestChordPitch (pitch, chord, sc, localRoot);
+                if (std::abs (ct - pitch) <= 5) pitch = ct;
+            }
+            const float gate = climax ? 0.98f : (s % 4 == 0 ? 0.94f : 0.72f);
+            ev[ne++] = { b, s, pitch, s % 4 == 0, climax, (b % 4) == 3 && s >= 13, false, gate };
+            prev = pitch;
+            // counter-melody: a held 6th below the strong beats, under the lead (pad flag)
+            if ((s % 8) == 0 && ne < 250)
+            {
+                const int cp = nearestScalePitch (pitch - 8, sc, localRoot);
+                ev[ne++] = { b, s, cp, false, false, false, true, 0.96f };
+            }
+        }
+    }
+}
+
 int generatePhrase (const GenParams& g, Note* out, const EditStore* ed)
 {
     const int* sc = scales[juce::jlimit (0, numScales - 1, g.scale)];
@@ -583,7 +790,7 @@ int generatePhrase (const GenParams& g, Note* out, const EditStore* ed)
         bVar[b] = code > 0 ? (code - 1) / 10000 : g.variation;
     }
     // one phrase per (seed, variation). A locked bar reads the phrase of the seed it was locked with.
-    PhraseEv kept[16][16];
+    PhraseEv kept[16][24];
     int keptN[16] = {};
     bool filled[16] = {};
     for (int b = 0; b < bars; ++b)
@@ -592,12 +799,14 @@ int generatePhrase (const GenParams& g, Note* out, const EditStore* ed)
         uint16_t masks[16] = {};
         PhraseEv ev[256];
         int ne = 0;
-        fillPhrase (g, bSeed[b], bVar[b], masks, ev, ne);
+        if (g.epic > 0) fillEpic (g, bSeed[b], bVar[b], masks, ev, ne);
+        else if (g.variety > 0) fillRich (g, bSeed[b], bVar[b], masks, ev, ne);
+        else fillPhrase (g, bSeed[b], bVar[b], masks, ev, ne);
         for (int c = b; c < bars; ++c)
         {
             if (edited[c] || bSeed[c] != bSeed[b] || bVar[c] != bVar[b]) continue;
             keptN[c] = 0;
-            for (int i = 0; i < ne && keptN[c] < 16; ++i)
+            for (int i = 0; i < ne && keptN[c] < 24; ++i)
                 if (ev[i].bar == c) kept[c][keptN[c]++] = ev[i];
             filled[c] = true;
         }
@@ -620,11 +829,11 @@ int generatePhrase (const GenParams& g, Note* out, const EditStore* ed)
         for (int i = 0; i < keptN[b] && nm < 256; ++i)
         {
             const auto& e = kept[b][i];
+            if (e.pad) continue;   // counter-melody is emitted with the chords
             float vel = e.climax ? 1.0f : (e.accent ? 0.94f : 0.76f);
             if (e.pickup) vel = 0.70f + 0.08f * (float) (e.step - 13);
             vel *= 0.94f + 0.06f * rb.next();
-            mel[nm++] = { b, b * 4.0 + e.step * 0.25, 0.25, e.pitch, juce::jlimit (0.15f, 1.0f, vel) };
-            mel[nm - 1].len = 0;
+            mel[nm++] = { b, b * 4.0 + e.step * 0.25, e.gate, e.pitch, juce::jlimit (0.15f, 1.0f, vel) };
         }
     }
     for (int i = 0; i < nm; ++i)
@@ -635,22 +844,37 @@ int generatePhrase (const GenParams& g, Note* out, const EditStore* ed)
         double gap = nxt >= 0 ? mel[nxt].start - mel[i].start : 0.5;
         if (gap < 1.0e-6) gap = 0.25;
         const bool strong = mel[i].vel >= 0.9f;
+        const float asked = (float) mel[i].len;   // per-note gate ratio, 0 = default
         double len;
-        if (french) len = juce::jmin (gap * (strong ? 0.68 : 0.56), strong ? 0.60 : 0.45);
+        if (g.epic > 0) len = gap * (asked > 0.2f ? asked : (strong ? 0.97f : 0.9f));
+        else if (asked > 0.2f && ! french) len = gap * asked;
+        else if (french) len = juce::jmin (gap * (strong ? 0.68 : 0.56), strong ? 0.60 : 0.45);
         else { len = gap * (strong ? 0.90 : 0.80); if (gap >= 0.75) len = juce::jmin (len, 0.48); }
         if (nxt >= 0) len = juce::jmin (len, gap - 0.02);
         mel[i].len = juce::jmax (0.05, len);
     }
     int n = 0;
+    const int liftAt = bars >= 16 ? 12 : (bars >= 8 ? 6 : bars - 1);
+    auto tone = [&] (int b, int deg, int k, bool finalChord) {
+        int p = degToNote (deg + k * 2 - 7);
+        if (g.epic > 0 && b >= liftAt) p += 5;                 // the pad lifts with the melody
+        if (g.epic > 0 && finalChord && k == 1)
+        {
+            const int lower = degToNote (deg - 7) + (b >= liftAt ? 5 : 0);
+            if (((p - lower) % 12 + 12) % 12 == 3) ++p;       // Picardy / borrowed major third
+        }
+        return juce::jlimit (0, 127, p);
+    };
     auto emitChords = [&] (int b, int deg)
     {
         const double base = b * 4.0;
+        const bool finalChord = b >= bars - barsPerChord;
         switch (g.chordStyle)
         {
-            case 1: for (int beat = 0; beat < 4; ++beat) for (int k = 0; k < 3; ++k) out[n++] = { base + beat + 0.5, 0.4, degToNote (deg + k * 2 - 7), 0.55f, true }; break;
-            case 2: { static const int order[4] = { 0, 1, 2, 1 }; for (int st = 0; st < 16; ++st) out[n++] = { base + st * 0.25, 0.2, degToNote (deg + order[st % 4] * 2 - 7), 0.55f, true }; break; }
-            case 3: for (int e = 0; e < 8; ++e) for (int k = 0; k < 3; ++k) out[n++] = { base + e * 0.5, 0.4, degToNote (deg + k * 2 - 7), 0.55f, true }; break;
-            default: if (b % barsPerChord == 0) for (int k = 0; k < 3; ++k) out[n++] = { base, barsPerChord * 4.0 - 0.05, degToNote (deg + k * 2 - 7), 0.55f, true };
+            case 1: for (int beat = 0; beat < 4; ++beat) for (int k = 0; k < 3; ++k) out[n++] = { base + beat + 0.5, 0.4, tone (b, deg, k, finalChord), 0.55f, true }; break;
+            case 2: { static const int order[4] = { 0, 1, 2, 1 }; for (int st = 0; st < 16; ++st) out[n++] = { base + st * 0.25, 0.2, tone (b, deg, order[st % 4], finalChord), 0.55f, true }; break; }
+            case 3: for (int e = 0; e < 8; ++e) for (int k = 0; k < 3; ++k) out[n++] = { base + e * 0.5, 0.4, tone (b, deg, k, finalChord), 0.55f, true }; break;
+            default: if (b % barsPerChord == 0) for (int k = 0; k < 3; ++k) out[n++] = { base, barsPerChord * 4.0 - 0.05, tone (b, deg, k, finalChord), 0.55f, true };
         }
     };
     for (int b = 0; b < bars && n < maxNotes - 64; ++b)
@@ -658,6 +882,10 @@ int generatePhrase (const GenParams& g, Note* out, const EditStore* ed)
         const int chordDeg = pr[(b / barsPerChord) % 4];
         for (int i = 0; i < nm && n < maxNotes - 64; ++i)
             if (mel[i].bar == b) out[n++] = { mel[i].start, mel[i].len, juce::jlimit (0, 127, mel[i].pitch), mel[i].vel, false };
+        if (! edited[b])
+            for (int i = 0; i < keptN[b] && n < maxNotes - 64; ++i)
+                if (kept[b][i].pad)
+                    out[n++] = { b * 4.0 + kept[b][i].step * 0.25, 1.6, juce::jlimit (0, 127, kept[b][i].pitch), 0.42f, true };
         emitChords (b, chordDeg);
     }
     return n;
@@ -730,7 +958,7 @@ int generate (const GenParams& g, Note* out, const EditStore* ed = nullptr)
 enum { keyI, scaleI, progI, barsI, rhythmI, densI, octI, rangeI, seedI, chordsI, reverbI, outI,
        detuneI, widthI, cutoffI, resoI, fenvI, attackI, decayI, sustainI, releaseI, rsizeI, midioutI, playI, syncI, variationI, modeI,
        c1I, c2I, c3I, c4I, ownLevelI_, ownTuneI_, ownKeyI_, ownModeI_,   // (the four OWN SOUND params, see addOwnSoundSpecs)
-       chordstyleI, pumpI, engineI };
+       chordstyleI, pumpI, engineI, varietyI, epicI };
 
 std::vector<Spec> tuneSpecs()
 {
@@ -776,6 +1004,10 @@ std::vector<Spec> tuneSpecs()
     // appended last: parameter IDs stay frozen. Default is Phrase so a new instance writes the new melodies.
     // A project saved before this parameter has no "melodyEngine" marker; stateLoaded puts it back on Classic.
     s.push_back (C ("engine", "Engine", { "Classic", "Phrase" }, 1, false, false));
+    // appended after Engine. Tight = the Phrase engine as first shipped (saved projects land here). Wide = the
+    // varied phrases. Default Wide for a new instance; stateLoaded puts a project that never had this parameter on Tight.
+    s.push_back (C ("variety", "Variety", { "Tight", "Wide" }, 1, false, false));
+    s.push_back (C ("epic", "Epic", { "Off", "Epic" }, 0, false, false));   // symphonic themes; Classic ignores it
     return s;
 }
 
@@ -869,6 +1101,11 @@ std::vector<Preset> tunePresets()
         { "Pickup Anthem Lead",       { {"key",11},{"scale",1},{"prog",21},{"rhythm",12},{"seed",3636},{"cutoff",8000} } },
         { "Hoover Stab Raw",          { {"key",1},{"scale",7},{"prog",22},{"rhythm",13},{"seed",3737},{"attack",1},{"decay",300},{"sustain",0.4f},{"detune",45} } },
         { "Crystal Dream",            { {"key",6},{"scale",8},{"prog",23},{"rhythm",3},{"seed",3838},{"reverb",0.6f},{"attack",30} } },
+        { "Epic Hymn",                { {"key",9},{"scale",0},{"prog",0},{"bars",2},{"rhythm",4},{"seed",5101},{"engine",1},{"epic",1},{"range",10},{"reverb",0.55f},{"attack",50},{"release",700},{"chordstyle",0},{"chords",0.45f} } },
+        { "Epic Harmonic Lift",       { {"key",4},{"scale",1},{"prog",3},{"bars",2},{"rhythm",3},{"seed",5202},{"engine",1},{"epic",1},{"range",11},{"reverb",0.6f},{"attack",80},{"release",800},{"detune",28} } },
+        { "Epic Phrygian",            { {"key",2},{"scale",2},{"prog",2},{"bars",2},{"rhythm",4},{"seed",5303},{"engine",1},{"epic",1},{"reverb",0.5f},{"attack",40},{"release",600},{"cutoff",5000} } },
+        { "Epic Dorian Hymn",         { {"key",7},{"scale",3},{"prog",6},{"bars",2},{"rhythm",3},{"seed",5404},{"engine",1},{"epic",1},{"reverb",0.58f},{"attack",60},{"release",750},{"chords",0.5f} } },
+        { "Epic Dominant Theme",      { {"key",11},{"scale",6},{"prog",18},{"bars",2},{"rhythm",4},{"seed",5505},{"engine",1},{"epic",1},{"range",10},{"reverb",0.52f},{"attack",30},{"release",650},{"cutoff",7000} } },
     };
 }
 }
@@ -882,6 +1119,8 @@ public:
         own.attach (apvts);
         setFrenchPresets (tuneFrenchPresets());
         apvts.state.setProperty ("melodyEngine", 1, nullptr);   // this state knows the Engine parameter (old projects do not)
+        apvts.state.setProperty ("phraseVariety", 1, nullptr);  // Wide phrases; a project saved before Variety falls back to Tight
+        setTheme (3);                                           // Virtual Boy (and its FRENCHCORE link) is the startup theme
     }
     const juce::String getName() const override { return BOY_NAME; }
     bool acceptsMidi() const override { return true; }
@@ -894,7 +1133,7 @@ public:
         static const int barsV[] = { 4, 8, 16 };
         GenParams g { (int) get (keyI), (int) get (scaleI), (int) get (progI), barsV[juce::jlimit (0, 2, (int) get (barsI))],
                       (int) get (rhythmI), (int) get (octI), (int) get (rangeI), (int) get (seedI), (int) get (variationI), get (densI), {}, {}, (int) get (chordstyleI),
-                      (int) get (engineI), frenchcore() ? 1 : 0 };
+                      (int) get (engineI), frenchcore() ? 1 : 0, (int) get (varietyI), (int) get (epicI) };
         for (int b = 0; b < 16; ++b) g.locks[(size_t) b] = locks[(size_t) b].load (std::memory_order_relaxed);
         for (int k = 0; k < 4; ++k) g.cust[(size_t) k] = juce::jlimit (0, 6, (int) get (c1I + k) - 1);
         return g;
@@ -929,6 +1168,8 @@ public:
         for (int c = 0; c < 4; ++c) k[(size_t) (27 + c)] = g.cust[(size_t) c];
         k[32] = g.engine;
         k[33] = g.engine == 0 ? 0 : g.french;   // Classic ignores FRENCHCORE, so toggling it does not rebuild that melody
+        k[34] = g.engine == 0 ? 0 : g.variety;
+        k[35] = g.engine == 0 ? 0 : g.epic;
         return k;
     }
 
@@ -1047,6 +1288,23 @@ public:
                 p->setValueNotifyingHost (p->convertTo0to1 (0.0f));
             apvts.state.setProperty ("melodyEngine", 1, nullptr);
         }
+        // Variety defaults to Wide. A project from before that parameter has no marker, so it stays on Tight
+        // (the Phrase engine as first shipped) and sounds the same.
+        if (! apvts.state.hasProperty ("phraseVariety"))
+        {
+            if (auto* p = apvts.getParameter ("variety"))
+                p->setValueNotifyingHost (p->convertTo0to1 (0.0f));
+            apvts.state.setProperty ("phraseVariety", 1, nullptr);
+        }
+        // No saved theme (a new insert, or a project from before themes were stored): open on Virtual Boy.
+        // A theme the user picked is kept, and the theme menu still changes it for the rest of the session.
+        if (! apvts.state.hasProperty ("theme"))
+        {
+            const bool hadFc = apvts.state.hasProperty ("frenchcore");
+            const bool fc = frenchcore();
+            setTheme (3);
+            if (hadFc) setFrenchcore (fc);
+        }
     }
 
     // Render test: reload this processor as if the project was saved before Engine existed.
@@ -1057,9 +1315,10 @@ public:
         auto xml = getXmlFromBinary (in.getData(), (int) in.getSize());
         if (xml == nullptr) return;
         xml->removeAttribute ("melodyEngine");
+        xml->removeAttribute ("phraseVariety");
         for (int i = xml->getNumChildElements(); --i >= 0;)
             if (auto* c = xml->getChildElement (i))
-                if (c->getStringAttribute ("id") == "engine")
+                if (c->getStringAttribute ("id") == "engine" || c->getStringAttribute ("id") == "variety" || c->getStringAttribute ("id") == "epic")
                     xml->removeChildElement (c, true);
         juce::MemoryBlock out;
         copyXmlToBinary (*xml, out);

@@ -355,6 +355,7 @@ static int tuneChecks (boy::BaseProcessor& base)
         tp.hostBpm.store (150.0);
         const auto midN = File::getCurrentWorkingDirectory().getChildFile ("phrase_normal.mid");
         const bool wroteN = tp.writeMidiFile (midN);
+        { AudioBuffer<float> wav; boytest::render (tp, "tune", 12.0, &wav); boytest::writeWav (wav, File::getCurrentWorkingDirectory().getChildFile ("phrase_normal.wav")); }
         tp.setFrenchcore (true);
         tp.setParam ("rhythm", 13.0f);
         tp.setParam ("density", 0.75f);
@@ -363,11 +364,93 @@ static int tuneChecks (boy::BaseProcessor& base)
         tp.hostBpm.store (190.0);
         const auto midF = File::getCurrentWorkingDirectory().getChildFile ("phrase_frenchcore.mid");
         const bool wroteF = tp.writeMidiFile (midF);
+        { AudioBuffer<float> wav; boytest::render (tp, "tune", 12.0, &wav); boytest::writeWav (wav, File::getCurrentWorkingDirectory().getChildFile ("phrase_frenchcore.wav")); }
         tp.setFrenchcore (false);
         tp.applyPreset (0);
-        const bool pass = okN == 7 && okF == 7 && same && freshPhrase && fcPhrase;
-        std::printf ("  [%s] phrase engine: normal %d/7, FRENCHCORE %d/7, legacy->Classic %s, new instance Phrase %s, FC preset Phrase %s\n",
-                     pass ? "OK" : "FAIL", okN, okF, same ? "yes" : "NO", freshPhrase ? "yes" : "NO", fcPhrase ? "yes" : "NO");
+        const bool freshVb = fresh.themeIndex() == 3 && fresh.frenchcore();
+        // Tight (the shipped Phrase) vs Wide, same 7 seeds: distinct bars, interval entropy, contour distance
+        auto metrics = [&] (int variety, double& distinct, double& entropy, double& contour) {
+            distinct = entropy = contour = 0;
+            std::vector<std::vector<int>> deltas (7);
+            for (int s = 0; s < 7; ++s)
+            {
+                tp.setParam ("engine", 1.0f); tp.setParam ("epic", 0.0f); tp.setParam ("variety", (float) variety);
+                tp.setParam ("frenchcore", 0.0f);
+                tp.setFrenchcore (false);
+                tp.setParam ("bars", 1.0f); tp.setParam ("rhythm", 1.0f); tp.setParam ("scale", 0.0f); tp.setParam ("density", 0.65f);
+                tp.setParam ("seed", (float) seeds[s]); tp.setParam ("variation", 0.0f);
+                const int n = tp.generateNow (a.data());
+                uint16_t mask[8] = {};
+                std::vector<int> pitches;
+                for (int i = 0; i < n; ++i)
+                {
+                    if (a[(size_t) i].chord || a[(size_t) i].start >= 32.0) continue;
+                    const int bar = (int) (a[(size_t) i].start / 4.0);
+                    const int step = (int) std::floor ((a[(size_t) i].start - bar * 4.0) / 0.25 + 0.5);
+                    if (bar >= 0 && bar < 8 && step >= 0 && step < 16) { mask[bar] = (uint16_t) (mask[bar] | (1u << step)); pitches.push_back (a[(size_t) i].pitch); }
+                }
+                int uniq = 0;
+                for (int i = 0; i < 8; ++i) { bool seen = false; for (int j = 0; j < i; ++j) if (mask[j] == mask[i]) seen = true; uniq += seen ? 0 : 1; }
+                distinct += uniq;
+                int hist[25] = {};
+                int niv = 0;
+                deltas[s].clear();
+                for (size_t i = 1; i < pitches.size(); ++i)
+                {
+                    const int d = pitches[i] - pitches[i - 1];
+                    deltas[s].push_back (d);
+                    ++hist[juce::jlimit (0, 24, d + 12)];
+                    ++niv;
+                }
+                double h = 0;
+                for (int c : hist) if (c > 0 && niv > 0) { const double p = (double) c / (double) niv; h -= p * std::log (p) / std::log (2.0); }
+                entropy += h;
+            }
+            distinct /= 7.0; entropy /= 7.0;
+            double acc = 0; int pairs = 0;
+            for (int i = 0; i < 7; ++i) for (int j = i + 1; j < 7; ++j)
+            {
+                const int m = (int) std::max (deltas[i].size(), deltas[j].size());
+                if (m == 0) continue;
+                double l1 = 0;
+                for (int k = 0; k < m; ++k)
+                {
+                    const int a = k < (int) deltas[i].size() ? deltas[i][(size_t) k] : 0;
+                    const int b = k < (int) deltas[j].size() ? deltas[j][(size_t) k] : 0;
+                    l1 += std::abs (a - b);
+                }
+                acc += l1 / (double) m; ++pairs;
+            }
+            contour = pairs > 0 ? acc / (double) pairs : 0;
+        };
+        double d0, e0, c0, d1, e1, c1;
+        metrics (0, d0, e0, c0);
+        metrics (1, d1, e1, c1);
+        const bool richer = e1 > e0 + 0.05 && c1 > c0 + 0.2;
+        std::printf ("  variety Tight -> Wide: distinct %.2f -> %.2f, interval entropy %.2f -> %.2f bits, contour distance %.2f -> %.2f\n",
+                     d0, d1, e0, e1, c0, c1);
+        // two epic themes, MIDI + a short render
+        auto exportEpic = [&] (const char* name, float presetSeed, float scale, float prog) {
+            tp.setFrenchcore (false);
+            tp.setParam ("engine", 1.0f); tp.setParam ("epic", 1.0f); tp.setParam ("bars", 2.0f);
+            tp.setParam ("scale", scale); tp.setParam ("prog", prog); tp.setParam ("rhythm", 4.0f);
+            tp.setParam ("seed", presetSeed); tp.setParam ("reverb", 0.55f); tp.setParam ("chordstyle", 0.0f); tp.setParam ("midiout", 1.0f);
+            tp.hostBpm.store (140.0);
+            const auto mid = File::getCurrentWorkingDirectory().getChildFile (name).withFileExtension ("mid");
+            const bool midiOk = tp.writeMidiFile (mid);
+            AudioBuffer<float> wav;
+            const auto rr = boytest::render (tp, "tune", 20.0, &wav);
+            const auto wavF = File::getCurrentWorkingDirectory().getChildFile (name).withFileExtension ("wav");
+            boytest::writeWav (wav, wavF);
+            std::printf ("  epic %s: midi %s, wav rms %.3f %s\n", name, midiOk ? "yes" : "NO", rr.rms, rr.bad ? "BAD" : "clean");
+            return midiOk && ! rr.bad && rr.rms > 0.005 && rr.midiOut > 0;
+        };
+        const bool epicOk = exportEpic ("epic_hymn", 5101.0f, 0.0f, 0.0f) && exportEpic ("epic_lift", 5202.0f, 1.0f, 3.0f);
+        tp.setParam ("epic", 0.0f);
+        tp.setTheme (3);   // the screenshot after this check is the startup theme
+        const bool pass = okN == 7 && okF == 7 && same && freshPhrase && fcPhrase && freshVb && richer && epicOk;
+        std::printf ("  [%s] phrase engine: normal %d/7, FRENCHCORE %d/7, legacy->Classic %s, new instance Phrase %s, FC preset Phrase %s, Virtual Boy %s, variety up %s, epic %s\n",
+                     pass ? "OK" : "FAIL", okN, okF, same ? "yes" : "NO", freshPhrase ? "yes" : "NO", fcPhrase ? "yes" : "NO", freshVb ? "yes" : "NO", richer ? "yes" : "NO", epicOk ? "yes" : "NO");
         if (wroteN || wroteF)
             std::printf ("  MIDI examples: %s %s, %s %s\n", wroteN ? "wrote" : "FAILED", midN.getFullPathName().toRawUTF8(), wroteF ? "wrote" : "FAILED", midF.getFullPathName().toRawUTF8());
         fails += pass ? 0 : 1;

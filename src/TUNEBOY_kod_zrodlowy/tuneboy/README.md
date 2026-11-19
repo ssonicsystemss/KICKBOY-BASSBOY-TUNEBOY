@@ -53,7 +53,10 @@ Wybierz motyw **Virtual Boy** (klik w nazwę presetu → THEME) – tryb włącz
 ręcznie w tym samym menu („FRENCHCORE mode”). Sam syntezator (cutoff, detune, pogłos) **nie przeskakuje** przy przełączeniu.
 - **Presety:** w trybie FRENCHCORE lista presetów to osobna paczka pod 180–200 BPM (nazwy zaczynają się od „FC”): krótkie, akcentowane leady w moll (offbeat, gallop, hoover, pickup), nie długie równe nuty.
 - **RANDOMIZE:** gęstsze melodie pod 180+ BPM (Density około 0.58–0.9), rytmy ze stabami i synkopą (bez Long Notes i Half-time), skale molowe. NEW SOUND nadal losuje szybkie brzmienia. Bez tempa z hosta TUNEBOY gra 190 BPM.
-- **ENGINE** (strona ADVANCED): **Phrase** układa frazy 4-taktowe (pytanie, odpowiedź, sekwencja, kadencja z wejściem), prowadzi głos i ma jeden szczyt na 8 taktów. W FRENCHCORE nuty są krótkie, z przerwami i offbeatem. **Classic** to poprzedni generator. Nowa instancja i presety FC startują na Phrase. Stary projekt, zapisany zanim ten parametr istniał, otwiera się na Classic i brzmi tak samo jak wcześniej.
+- **ENGINE** (strona ADVANCED): **Phrase** układa frazy, prowadzi głos i ma jeden szczyt na 8 taktów. W FRENCHCORE nuty są krótkie, z przerwami i offbeatem. **Classic** to stary generator. Nowa instancja i presety FC startują na Phrase. Stary projekt sprzed tego parametru otwiera się na Classic i brzmi tak samo.
+- **VARIETY** (ADVANCED): **Wide** (nowe instancje) rozciąga frazę na A / A' / B / A'' — inne rytmy, ozdobniki, skoki rejestru. **Tight** to Phrase z poprzedniej wersji. Stary projekt bez tego parametru zostaje na Tight.
+- **EPIC** (ADVANCED): długa, symfoniczna melodia na 16 taktów (budowa → kulminacja → podniesienie o kwartę, pikardyjska tercja w ostatnim akordzie) plus wolniejsza druga linia pod leadem. Kilka presetów „Epic …”. Classic ten przełącznik ignoruje.
+- **Motyw na starcie:** nowy TUNEBOY otwiera się w **Virtual Boy** (czerwony, tryb FRENCHCORE włącza się razem z nim, jak przy ręcznym wyborze motywu). Motyw zapisany w projekcie zostaje. W sesji motyw da się zmienić w menu.
 
 ## Wspólne dla serii BOY
 Presety + **MY PRESETS** (klik w nazwę), **RANDOMIZE** + **↶** cofnij, prawy klik: *Create automation clip* / *Freeze* /
