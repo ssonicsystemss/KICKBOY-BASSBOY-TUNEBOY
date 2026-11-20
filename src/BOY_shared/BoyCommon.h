@@ -159,18 +159,21 @@ public:
     // ---- RANDOMIZE (+ undo), FREEZE
     void randomize()
     {
-        std::random_device rd; std::mt19937 rng (rd());
+        auto& rng = randomEngine();
         pushUndo();
         for (auto& sp : specs)
         {
             const bool fc = frenchcore() && sp.frSet;   // FRENCHCORE window when the mode is on and the parameter has one
             const float lo = fc ? sp.frLo : sp.rndMin, hi = fc ? sp.frHi : sp.rndMax;
             if (lo == hi || isFrozen (sp.id)) continue;
-            const bool discrete = ! sp.choices.isEmpty() || sp.isInt;
-            std::uniform_real_distribution<float> d (discrete ? lo - 0.499f : lo, discrete ? hi + 0.499f : hi);
-            float v = d (rng);
-            if (discrete) v = std::round (v);
-            setParam (sp.id, v);
+            if (sp.choices.isEmpty() && ! sp.isInt)
+            {
+                const float weight = (std::generate_canonical<float, 24> (rng) + std::generate_canonical<float, 24> (rng)) * 0.5f;
+                setParam (sp.id, lo + (hi - lo) * weight);
+            }
+            else
+                setParam (sp.id, (float) differentRandomInt (rng, juce::roundToInt (lo), juce::roundToInt (hi),
+                                                           juce::roundToInt (get (indexOf (sp.id)))));
         }
         randomizeExtra (rng);
         apvts.state.setProperty ("presetIndex", -1, nullptr);
@@ -189,6 +192,8 @@ public:
             if (! juce::approximatelyEqual (ps[i]->getValue(), snap.vals[(size_t) i])) setNorm (*ps[i], snap.vals[(size_t) i]);
         apvts.state.setProperty ("presetName", snap.name, nullptr);
         apvts.state.setProperty ("presetIndex", snap.index, nullptr);
+        if (snap.soundName.isVoid()) apvts.state.removeProperty ("soundName", nullptr);
+        else apvts.state.setProperty ("soundName", snap.soundName, nullptr);
         presetChanged();
     }
     bool isFrozen (const juce::String& id) const
@@ -202,6 +207,20 @@ public:
     }
     virtual void randomizeExtra (std::mt19937&) {}
     virtual void presetChanged() {}
+
+    // UI actions only. Each thread keeps its generator across button presses.
+    static std::mt19937& randomEngine()
+    {
+        static thread_local std::mt19937 rng (std::random_device{}());
+        return rng;
+    }
+    static int differentRandomInt (std::mt19937& rng, int lo, int hi, int current)
+    {
+        const bool skip = lo < hi && current >= lo && current <= hi;
+        std::uniform_int_distribution<int> draw (lo, hi - (skip ? 1 : 0));
+        const int value = draw (rng);
+        return value + (skip && value >= current ? 1 : 0);
+    }
 
     // one complete host gesture per change, so FL records it (automation / undo)
     void setParam (const juce::String& id, float v)
@@ -319,13 +338,14 @@ public:
     std::vector<std::atomic<float>*> raw;
 
 private:
-    struct Snapshot { std::vector<float> vals; juce::String name; int index = 0; };
+    struct Snapshot { std::vector<float> vals; juce::String name; juce::var soundName; int index = 0; };
     std::vector<Snapshot> undoStack;
     void pushUndo()
     {
         Snapshot s;
         for (auto* p : getParameters()) s.vals.push_back (p->getValue());
         s.name = presetName(); s.index = presetIndex();
+        s.soundName = apvts.state.getProperty ("soundName");
         undoStack.push_back (std::move (s));
         if (undoStack.size() > 16) undoStack.erase (undoStack.begin());
     }

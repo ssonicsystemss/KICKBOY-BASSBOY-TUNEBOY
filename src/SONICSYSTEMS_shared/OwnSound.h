@@ -79,7 +79,6 @@ public:
     void prepare (double sampleRate)
     {
         hostRate = sampleRate > 0.0 ? sampleRate : 44100.0;
-        const juce::SpinLock::ScopedLockType sl (lock);
         for (auto& v : voices) v.active = false;
         numEvents = 0;
     }
@@ -149,10 +148,14 @@ public:
     std::vector<float> peaks (int points) const
     {
         std::vector<float> out ((size_t) juce::jmax (0, points), 0.0f);
+        std::shared_ptr<const Sample> sample;
         {
-            const juce::SpinLock::ScopedLockType sl (lock);
-            if (current == nullptr || out.empty()) return {};
-            const auto& d = current->data;
+            const juce::SpinLock::ScopedLockType sl (sampleLock);
+            sample = displaySample;
+        }
+        if (sample == nullptr || out.empty()) return {};
+        {
+            const auto& d = sample->data;
             const juce::int64 len = d.getNumSamples();
             for (int i = 0; i < points; ++i)
             {
@@ -190,11 +193,21 @@ public:
     void render (juce::AudioBuffer<float>& buffer) noexcept
     {
         const int n = buffer.getNumSamples();
-        if (replaceClearsAll && replacing()) buffer.clear();
-        const juce::SpinLock::ScopedTryLockType sl (lock);
-        if (! sl.isLocked() || current == nullptr) { numEvents = 0; return; }
-        const int due = n;
-        if (resetVoices) { for (auto& v : voices) v.active = false; resetVoices = false; }
+        // If the producer is publishing, keep rendering the previous sample for this block.
+        // Move the old one back to the producer so the audio thread never frees sample memory.
+        if (sampleChanged.load (std::memory_order_acquire))
+        {
+            const juce::SpinLock::ScopedTryLockType sl (sampleLock);
+            if (sl.isLocked())
+            {
+                retired.swap (current);
+                current.swap (pending);
+                sampleChanged.store (false, std::memory_order_release);
+                for (auto& v : voices) v.active = false;
+            }
+        }
+        if (current == nullptr) { numEvents = 0; return; }
+        if (replaceClearsAll && mode->load() > 0.5f) buffer.clear();
 
         const float lv = level->load();
         const float target = lv <= -39.95f ? 0.0f : juce::Decibels::decibelsToGain (lv);
@@ -202,7 +215,17 @@ public:
         const bool follow = key->load() > 0.5f;
 
         // events arrive in time order from one source; a plugin mixing MIDI + engine hits may not: keep them sorted
-        std::stable_sort (events.begin(), events.begin() + numEvents, [] (const Event& a, const Event& b) { return a.at < b.at; });
+        for (int i = 1; i < numEvents; ++i)
+        {
+            const auto event = events[(size_t) i];
+            int j = i;
+            while (j > 0 && events[(size_t) (j - 1)].at > event.at)
+            {
+                events[(size_t) j] = events[(size_t) (j - 1)];
+                --j;
+            }
+            events[(size_t) j] = event;
+        }
         int e = 0, pos = 0;
         while (pos < n)
         {
@@ -213,7 +236,7 @@ public:
         }
         // events pushed past this block by the latency wait for the next one
         int kept = 0;
-        for (; e < numEvents; ++e) { auto ev = events[(size_t) e]; ev.at = juce::jmax (0, ev.at - due); events[(size_t) kept++] = ev; }
+        for (; e < numEvents; ++e) { auto ev = events[(size_t) e]; ev.at = juce::jmax (0, ev.at - n); events[(size_t) kept++] = ev; }
         numEvents = kept;
     }
 
@@ -267,14 +290,17 @@ private:
 
     void install (std::unique_ptr<Sample> s)
     {
-        seconds_.store (s != nullptr ? s->data.getNumSamples() / s->rate : 0.0);
+        std::shared_ptr<const Sample> next (std::move (s)), oldDisplay, oldAudio;
         {
-            const juce::SpinLock::ScopedLockType sl (lock);
-            std::swap (current, s);
-            resetVoices = true;
-            loaded.store (current != nullptr);
+            const juce::SpinLock::ScopedLockType sl (sampleLock);
+            oldAudio.swap (retired);
+            oldDisplay.swap (displaySample);
+            displaySample = next;
+            pending.swap (next);
+            seconds_.store (displaySample != nullptr ? displaySample->data.getNumSamples() / displaySample->rate : 0.0);
+            loaded.store (displaySample != nullptr);
+            sampleChanged.store (true, std::memory_order_release);
         }
-        // the old sample (now in `s`) is freed here, on the message thread
     }
 
     void push (Event ev) noexcept { ev.at += juce::jmax (0, latency); if (numEvents < (int) events.size()) events[(size_t) numEvents++] = ev; }
@@ -358,11 +384,12 @@ private:
     std::atomic<float>* mode = nullptr;
     double hostRate = 44100.0;
 
-    mutable juce::SpinLock lock;
-    std::unique_ptr<Sample> current;   // guarded by `lock`
+    mutable juce::SpinLock sampleLock;
+    std::shared_ptr<const Sample> pending, retired, displaySample;   // guarded by sampleLock
+    std::shared_ptr<const Sample> current;   // audio thread
+    std::atomic<bool> sampleChanged { false };
     std::atomic<bool> loaded { false };
     std::atomic<double> seconds_ { 0.0 };
-    bool resetVoices = false;
     std::array<Voice, 16> voices {};
     std::array<Event, 256> events {};
     int numEvents = 0;

@@ -12,6 +12,8 @@
 // writes short offbeat stabs instead of a sparse loop.
 #include "BoyUI.h"
 #include "OwnSound.h"
+#include <cstring>
+#include <limits>
 #include <map>
 
 using namespace boy;
@@ -89,7 +91,7 @@ const juce::StringArray rhythmNames { "Straight 1/8", "Syncopated", "Euphoric 1/
                                       "Reverse Gallop", "Sparse Offbeat", "Pickup Anthem", "Hoover Stabs" };
 constexpr int numRhythms = 14;
 
-struct GenParams { int key, scale, prog, bars, rhythm, octave, range, seed, variation; float density; std::array<int, 16> locks; std::array<int, 4> cust; int chordStyle; int engine; int french; int variety; int epic; };
+struct GenParams { int key, scale, prog, bars, rhythm, octave, range, seed, variation; float density; std::array<int, 16> locks; std::array<int, 4> cust; int chordStyle; int engine; int french; int variety; int epic; bool epicSeeded = false; };
 struct Note { double start, len; int pitch; float vel; bool chord; };
 constexpr int maxNotes = 1024;
 
@@ -196,8 +198,10 @@ Motif makeMotif (const GenParams& g, int seed, int variation)
     return m;
 }
 
-// lock code of a bar: 0 = free, else 1 + seed + 10000 * variation (the melody it had when you locked it)
-int lockCode (int seed, int variation) { return 1 + seed + 10000 * variation; }
+// Store seeded Epic in a spare bit; the numeric part still decodes states saved by older versions.
+constexpr int seededEpicLock = 1 << 21;
+int lockNumber (int code) { return code & (seededEpicLock - 1); }
+int lockCode (int seed, int variation, bool seeded) { return (1 + seed + 10000 * variation) | (seeded ? seededEpicLock : 0); }
 
 // ---- Phrase engine. Stack only (it runs on the audio thread).
 // One 4-bar phrase: call, answer, sequence, cadence with a rising 3-note pickup. Bars 5-8 develop it
@@ -712,7 +716,7 @@ void fillRich (const GenParams& g, int seed, int variation, uint16_t* masks, Phr
 
 // Epic / symphonic: long soaring line, a 16-bar build → climax → lift, a slower counter-melody under it.
 // The chord pad follows (generatePhrase). A Picardy third and a 4th-up lift are applied there on the last section.
-void fillEpic (const GenParams& g, int seed, int variation, uint16_t* masks, PhraseEv* ev, int& ne)
+void fillEpic (const GenParams& g, int seed, int variation, bool seeded, uint16_t* masks, PhraseEv* ev, int& ne)
 {
     const int bars = g.bars;
     const int* sc = scales[juce::jlimit (0, numScales - 1, g.scale)];
@@ -728,7 +732,12 @@ void fillEpic (const GenParams& g, int seed, int variation, uint16_t* masks, Phr
         masks[b] = longCell[part == 2 ? 3 : (part == 1 ? 2 : (b % 2))];
         if ((b % 4) == 3) masks[b] = (uint16_t) (masks[b] | 0xE000u);             // rising pickup into the next phrase
         if (b == bars - 1) masks[b] = (uint16_t) (0x0001u | 0xE000u);             // climax note, then a cadence
-        if (variation > 0 && b == 1) masks[b] = (uint16_t) (masks[b] | (1u << 6));
+        if (seeded && b > 0 && b < bars - 1)
+        {
+            Rng rhythm { phraseMix (seed, variation, b, 24) };
+            if (rhythm.next() < 0.40f) masks[b] |= (uint16_t) (1u << (rhythm.next() < 0.5f ? 6 : 10));
+        }
+        else if (! seeded && variation > 0 && b == 1) masks[b] = (uint16_t) (masks[b] | (1u << 6));
         if (masks[b] == 0) masks[b] = 0x0101u;
     }
     // statement, sequence, wide B, lift. Semitones above the (local) tonic.
@@ -743,6 +752,12 @@ void fillEpic (const GenParams& g, int seed, int variation, uint16_t* masks, Phr
         int anch = bars >= 16 ? arc16[b] : arc8[b % 8];
         if (bars < 8) anch = (b % 4) * 3;
         if (g.scale == 2 || g.scale == 6) anch += (b % 4 == 0 ? 1 : 0);           // phrygian b2 on the phrase starts
+        if (seeded && b > 0 && b < bars - 1)
+        {
+            Rng contour { phraseMix (seed, 0, b / 2, 25) };
+            const int offset = (int) (contour.next() * 5.0f) - 2;
+            anch += b % 2 == 0 ? offset : -offset;
+        }
         int steps[16], ns = 0;
         for (int s = 0; s < 16; ++s) if (masks[b] & (1u << s)) steps[ns++] = s;
         const int chord = pr[(b / barsPerChord) % 4];
@@ -752,6 +767,11 @@ void fillEpic (const GenParams& g, int seed, int variation, uint16_t* masks, Phr
             const bool climax = b == bars - 1 && i == 0;
             int target = localRoot + (climax ? 12 : anch);
             if (! climax && i > 0) target = prev + juce::jlimit (-7, 9, (localRoot + anch) - prev);
+            if (seeded && b > 0 && b < bars - 1 && (s % 4) != 0)
+            {
+                Rng passing { phraseMix (seed, variation, b, 30 + s) };
+                target += (int) (passing.next() * 5.0f) - 2;
+            }
             int pitch = nearestScalePitch (target, sc, localRoot);
             if (s % 4 == 0)
             {
@@ -780,14 +800,16 @@ int generatePhrase (const GenParams& g, Note* out, const EditStore* ed)
     auto degToNote = [&] (int d) { const int o = (d >= 0 ? d / 7 : (d - 6) / 7); const int i = d - o * 7; return root + o * 12 + sc[i]; };
     const int bars = g.bars, barsPerChord = bars >= 16 ? 2 : 1;
     const bool french = g.french != 0;
-    bool edited[16] = {};
+    bool edited[16] = {}, seeded[16] = {};
     int bSeed[16], bVar[16];
     for (int b = 0; b < bars; ++b)
     {
         edited[b] = ed != nullptr && ed->edited (b);
         const int code = g.locks[(size_t) juce::jlimit (0, 15, b)];
-        bSeed[b] = code > 0 ? (code - 1) % 10000 : g.seed;
-        bVar[b] = code > 0 ? (code - 1) / 10000 : g.variation;
+        const int number = lockNumber (code);
+        bSeed[b] = number > 0 ? (number - 1) % 10000 : g.seed;
+        bVar[b] = number > 0 ? (number - 1) / 10000 : g.variation;
+        seeded[b] = g.epic > 0 && (number > 0 ? (code & seededEpicLock) != 0 : g.epicSeeded);
     }
     // one phrase per (seed, variation). A locked bar reads the phrase of the seed it was locked with.
     PhraseEv kept[16][24];
@@ -799,12 +821,12 @@ int generatePhrase (const GenParams& g, Note* out, const EditStore* ed)
         uint16_t masks[16] = {};
         PhraseEv ev[256];
         int ne = 0;
-        if (g.epic > 0) fillEpic (g, bSeed[b], bVar[b], masks, ev, ne);
+        if (g.epic > 0) fillEpic (g, bSeed[b], bVar[b], seeded[b], masks, ev, ne);
         else if (g.variety > 0) fillRich (g, bSeed[b], bVar[b], masks, ev, ne);
         else fillPhrase (g, bSeed[b], bVar[b], masks, ev, ne);
         for (int c = b; c < bars; ++c)
         {
-            if (edited[c] || bSeed[c] != bSeed[b] || bVar[c] != bVar[b]) continue;
+            if (edited[c] || bSeed[c] != bSeed[b] || bVar[c] != bVar[b] || seeded[c] != seeded[b]) continue;
             keptN[c] = 0;
             for (int i = 0; i < ne && keptN[c] < 24; ++i)
                 if (ev[i].bar == c) kept[c][keptN[c]++] = ev[i];
@@ -929,7 +951,7 @@ int generate (const GenParams& g, Note* out, const EditStore* ed = nullptr)
             emitChords (b, chordDeg0);
             continue;
         }
-        const int code = g.locks[(size_t) juce::jlimit (0, 15, b)];
+        const int code = lockNumber (g.locks[(size_t) juce::jlimit (0, 15, b)]);
         const int bSeed = code > 0 ? (code - 1) % 10000 : g.seed, bVar = code > 0 ? (code - 1) / 10000 : g.variation;
         const Motif mo = code > 0 ? makeMotif (g, bSeed, bVar) : free;
         Rng rb { (uint32_t) bSeed * 31u + (uint32_t) b * 977u + (uint32_t) bVar * 13u + 1u };
@@ -958,7 +980,7 @@ int generate (const GenParams& g, Note* out, const EditStore* ed = nullptr)
 enum { keyI, scaleI, progI, barsI, rhythmI, densI, octI, rangeI, seedI, chordsI, reverbI, outI,
        detuneI, widthI, cutoffI, resoI, fenvI, attackI, decayI, sustainI, releaseI, rsizeI, midioutI, playI, syncI, variationI, modeI,
        c1I, c2I, c3I, c4I, ownLevelI_, ownTuneI_, ownKeyI_, ownModeI_,   // (the four OWN SOUND params, see addOwnSoundSpecs)
-       chordstyleI, pumpI, engineI, varietyI, epicI };
+       chordstyleI, pumpI, engineI, varietyI, epicI, epicSeededI };
 
 std::vector<Spec> tuneSpecs()
 {
@@ -971,7 +993,7 @@ std::vector<Spec> tuneSpecs()
         P ("density","Density",   0, 1, 0.6f, true, 0.35f, 0.9f).fr (0.58f, 0.9f),
         I ("octave", "Octave",    3, 6, 5, true, 4, 5).fr (4, 5),
         I ("range",  "Range",     3, 12, 7, true, 4, 9, "deg").fr (5, 10),
-        I ("seed",   "Seed",      1, 9999, 1, true, 1, 9999),
+        I ("seed",   "Seed",      1, 9999, 1, true, 1, 1),
         P ("chords", "Chords",    0, 1, 0.35f, true, 0.2f, 0.5f).fr (0.25f, 0.5f),
         P ("reverb", "Reverb",    0, 1, 0.35f, true, 0.35f, 0.35f),
         P ("out",    "Output",    -24, 6, -6, true, -6, -6, "dB"),
@@ -1008,6 +1030,7 @@ std::vector<Spec> tuneSpecs()
     // varied phrases. Default Wide for a new instance; stateLoaded puts a project that never had this parameter on Tight.
     s.push_back (C ("variety", "Variety", { "Tight", "Wide" }, 1, false, false));
     s.push_back (C ("epic", "Epic", { "Off", "Epic" }, 0, false, false));   // symphonic themes; Classic ignores it
+    s.push_back (C ("epicseeded", "Epic Seeded", { "Original", "Seeded" }, 0, false, false).as (Ui::hidden));
     return s;
 }
 
@@ -1120,6 +1143,7 @@ public:
         setFrenchPresets (tuneFrenchPresets());
         apvts.state.setProperty ("melodyEngine", 1, nullptr);   // this state knows the Engine parameter (old projects do not)
         apvts.state.setProperty ("phraseVariety", 1, nullptr);  // Wide phrases; a project saved before Variety falls back to Tight
+        apvts.state.setProperty ("epicSeedVersion", 1, nullptr);
         setTheme (3);                                           // Virtual Boy (and its FRENCHCORE link) is the startup theme
     }
     const juce::String getName() const override { return BOY_NAME; }
@@ -1133,7 +1157,7 @@ public:
         static const int barsV[] = { 4, 8, 16 };
         GenParams g { (int) get (keyI), (int) get (scaleI), (int) get (progI), barsV[juce::jlimit (0, 2, (int) get (barsI))],
                       (int) get (rhythmI), (int) get (octI), (int) get (rangeI), (int) get (seedI), (int) get (variationI), get (densI), {}, {}, (int) get (chordstyleI),
-                      (int) get (engineI), frenchcore() ? 1 : 0, (int) get (varietyI), (int) get (epicI) };
+                      (int) get (engineI), frenchcore() ? 1 : 0, (int) get (varietyI), (int) get (epicI), get (epicSeededI) > 0.5f };
         for (int b = 0; b < 16; ++b) g.locks[(size_t) b] = locks[(size_t) b].load (std::memory_order_relaxed);
         for (int k = 0; k < 4; ++k) g.cust[(size_t) k] = juce::jlimit (0, 6, (int) get (c1I + k) - 1);
         return g;
@@ -1141,22 +1165,86 @@ public:
     int generateNow (Note* dst) const { return generate (genParams(), dst, &edits); }
     void randomizeExtra (std::mt19937& rng) override
     {
-        setParam ("variation", 0.0f);   // a new seed starts without variation
-        if (! frenchcore()) return;
-        // Long Notes and Half-time never read as a frenchcore lead; major-family scales get a minor colour instead.
-        // The replacement stays inside the FRENCHCORE window the render test checks.
-        if (const int rhythm = (int) get (rhythmI); rhythm == 3 || rhythm == 9)
+        if (frenchcore())
         {
-            static const int stab[] = { 1, 5, 6, 10, 11, 12, 13 };
-            std::uniform_int_distribution<int> d (0, 6);
-            setParam ("rhythm", (float) stab[d (rng)]);
+            const int rhythm = (int) get (rhythmI), scale = (int) get (scaleI);
+            if (! isFrozen ("rhythm") && (rhythm == 3 || rhythm == 9))
+            {
+                const int stabs[] = { 1, 5, 6, 10, 11, 12, 13 };
+                setParam ("rhythm", (float) stabs[std::uniform_int_distribution<int> (0, 6) (rng)]);
+            }
+            if (! isFrozen ("scale") && (scale == 3 || scale == 4 || scale == 5))
+            {
+                const int minorScales[] = { 0, 1, 2, 6, 7 };
+                setParam ("scale", (float) minorScales[std::uniform_int_distribution<int> (0, 4) (rng)]);
+            }
         }
-        if (const int scale = (int) get (scaleI); scale == 3 || scale == 4 || scale == 5)
+        chooseMelody (false, rng, false);
+    }
+
+    bool chooseMelody (bool variation, std::mt19937& rng, bool undoable = true)
+    {
+        const char* id = variation ? "variation" : "seed";
+        if (isFrozen (id)) return false;
+        const auto g = genParams();
+        const bool seededEpic = g.engine != 0 && g.epic > 0;
+        const bool resetVariation = ! variation && ! isFrozen ("variation");
+        const int current = variation ? g.variation : g.seed;
+        std::vector<Note> generated (maxNotes);
+        using Grid = std::array<int, 16 * 16>;
+        auto fillGrid = [&] (const GenParams& params, Grid& grid)
         {
-            static const int minorish[] = { 0, 1, 2, 6, 7 };
-            std::uniform_int_distribution<int> d (0, 4);
-            setParam ("scale", (float) minorish[d (rng)]);
+            grid.fill (-1);
+            const int count = generate (params, generated.data(), &edits);
+            for (int i = 0; i < count; ++i)
+            {
+                const auto& note = generated[(size_t) i];
+                const int step = juce::jlimit (0, (int) grid.size() - 1, (int) std::floor (note.start * 4.0 + 1.0e-6));
+                const int bar = step / 16;
+                if (! note.chord && g.locks[(size_t) bar] == 0 && ! edits.edited (bar))
+                    grid[(size_t) step] = note.pitch;
+            }
+        };
+
+        Grid previous, candidate;
+        fillGrid (g, previous);
+        int best = current;
+        float bestScore = -std::numeric_limits<float>::infinity();
+        for (int attempt = 0; attempt < 10; ++attempt)
+        {
+            GenParams trial = g;
+            if (seededEpic) trial.epicSeeded = true;
+            const int value = differentRandomInt (rng, 1, variation ? 99 : 9999, current);
+            if (variation) trial.variation = value;
+            else { trial.seed = value; if (resetVariation) trial.variation = 0; }
+            fillGrid (trial, candidate);
+
+            int changed = 0, occupied = 0, pitches = 0, excess = 0, last = -1, repeated = 0;
+            for (size_t step = 0; step < candidate.size(); ++step)
+            {
+                const int pitch = candidate[step];
+                if (pitch >= 0 || previous[step] >= 0) ++occupied;
+                if (pitch != previous[step]) ++changed;
+                if (step % 16 == 0) { last = -1; repeated = 0; }
+                if (pitch < 0) continue;
+                ++pitches;
+                if (last >= 0) excess += juce::jmax (0, std::abs (pitch - last) - 9);
+                repeated = pitch == last ? repeated + 1 : 0;
+                if (repeated > 2) ++excess;
+                last = pitch;
+            }
+            if (changed == 0 || pitches == 0) continue;
+            const float distance = (float) changed / (float) occupied;
+            const float contrast = variation ? 1.0f - std::abs (distance - 0.30f) : juce::jmin (0.80f, distance);
+            const float score = contrast - 0.35f * (float) excess / (float) pitches;
+            if (score > bestScore) { bestScore = score; best = value; }
         }
+        if (best == current) return false;
+        if (undoable) rememberForUndo();
+        if (seededEpic && ! g.epicSeeded) setParam ("epicseeded", 1.0f);
+        if (resetVariation) setParam ("variation", 0.0f);
+        setParam (id, (float) best);
+        return true;
     }
     // everything the melody depends on, to notice a change
     GenKey keyOf (const GenParams& g) const
@@ -1170,6 +1258,7 @@ public:
         k[33] = g.engine == 0 ? 0 : g.french;   // Classic ignores FRENCHCORE, so toggling it does not rebuild that melody
         k[34] = g.engine == 0 ? 0 : g.variety;
         k[35] = g.engine == 0 ? 0 : g.epic;
+        k[36] = g.engine != 0 && g.epic > 0 && g.epicSeeded ? 1 : 0;
         return k;
     }
 
@@ -1252,14 +1341,22 @@ public:
     }
     void randomSound()
     {
-        std::random_device rd; std::mt19937 rng (rd());
+        auto& rng = randomEngine();
+        static const auto bank = soundBank();
+        const auto& model = bank[(size_t) std::uniform_int_distribution<int> (0, (int) bank.size() - 1) (rng)];
+        const bool fc = frenchcore();
         rememberForUndo();
         for (int k = 0; k < (int) (sizeof (soundIds) / sizeof (soundIds[0])); ++k)
         {
             const auto* id = soundIds[k];
             if (isFrozen (id)) continue;
-            std::uniform_real_distribution<float> d (frenchcore() ? soundLoFc[k] : soundLo[k], frenchcore() ? soundHiFc[k] : soundHi[k]);
-            setParam (id, d (rng));
+            const float lo = fc ? soundLoFc[k] : soundLo[k], hi = fc ? soundHiFc[k] : soundHi[k];
+            const auto hit = std::find_if (model.values.begin(), model.values.end(),
+                                           [id] (const auto& item) { return std::strcmp (item.first, id) == 0; });
+            const float center = hit != model.values.end() ? juce::jlimit (lo, hi, hit->second) : (lo + hi) * 0.5f;
+            const float offset = (hi - lo) * 0.25f;
+            std::uniform_real_distribution<float> draw (juce::jmax (lo, center - offset), juce::jmin (hi, center + offset));
+            setParam (id, draw (rng));
         }
         apvts.state.setProperty ("soundName", "Random", nullptr);
     }
@@ -1270,7 +1367,8 @@ public:
     void toggleLock (int bar)
     {
         bar = juce::jlimit (0, 15, bar);
-        locks[(size_t) bar].store (lockOf (bar) > 0 ? 0 : lockCode ((int) get (seedI), (int) get (variationI)));
+        const bool seeded = get (engineI) > 0.5f && get (epicI) > 0.5f && get (epicSeededI) > 0.5f;
+        locks[(size_t) bar].store (lockOf (bar) > 0 ? 0 : lockCode ((int) get (seedI), (int) get (variationI), seeded));
         juce::StringArray s; for (auto& l : locks) s.add (juce::String (l.load()));
         apvts.state.setProperty ("locks", s.joinIntoString (","), nullptr);
     }
@@ -1295,6 +1393,11 @@ public:
             if (auto* p = apvts.getParameter ("variety"))
                 p->setValueNotifyingHost (p->convertTo0to1 (0.0f));
             apvts.state.setProperty ("phraseVariety", 1, nullptr);
+        }
+        if (! apvts.state.hasProperty ("epicSeedVersion"))
+        {
+            if (auto* p = apvts.getParameter ("epicseeded")) p->setValueNotifyingHost (0.0f);
+            apvts.state.setProperty ("epicSeedVersion", 1, nullptr);
         }
         // No saved theme (a new insert, or a project from before themes were stored): open on Virtual Boy.
         // A theme the user picked is kept, and the theme menu still changes it for the rest of the session.
@@ -1357,8 +1460,14 @@ public:
         mel.updateMatchedPairs(); ch.updateMatchedPairs();
         juce::MidiFile mf; mf.setTicksPerQuarterNote (tpq);
         mf.addTrack (mel); if (chords) mf.addTrack (ch);
-        f.deleteFile(); juce::FileOutputStream os (f);
-        return os.openedOk() && mf.writeTo (os);
+        juce::TemporaryFile temp (f);
+        {
+            juce::FileOutputStream os (temp.getFile());
+            if (! os.openedOk() || ! mf.writeTo (os)) return false;
+            os.flush();
+            if (os.getStatus().failed()) return false;
+        }
+        return temp.overwriteTargetFileWithTemporary();
     }
 
     // Melody plays ONLY while a key is held (transposed: key 60 = as generated).
@@ -1371,6 +1480,9 @@ public:
 
         if (get (modeI) > 0.5f) { renderSingle (buf, midi, n, out); return; }
         if (wasSingle) { wasSingle = false; releaseVoices (0); nHeld = 0; running = false; justStarted = true; }
+        blockMidiMode = (int) get (midioutI);
+        if (blockMidiMode == 2) sendOffs (out, 0, 0);
+        if (blockMidiMode != 1) sendOffs (out, 0, 1);
 
         const auto gp = genParams();
         const auto key = keyOf (gp);
@@ -1449,7 +1561,7 @@ public:
             else if (msg.isAllNotesOff() || (msg.isController() && msg.getControllerNumber() == 123)) releaseVoices (e);
             else if (msg.isAllSoundOff() || (msg.isController() && msg.getControllerNumber() == 120)) { for (auto& v : voices) v.active = false; rev.reset(); }
         }
-        midi.clear();
+        midi.swapWith (out);
         renderSynth (buf, n);
         guiBeat.store (-1.0f, std::memory_order_relaxed);
     }
@@ -1510,8 +1622,17 @@ private:
     }
     void sendOffs (juce::MidiBuffer& out, int at)
     {
-        for (int c = 0; c < 2; ++c) for (int i = 0; i < 128; ++i)
-            if (outOn[c][i]) { out.addEvent (juce::MidiMessage::noteOff (c + 1, i), at); outOn[c][i] = false; }
+        sendOffs (out, at, 0);
+        sendOffs (out, at, 1);
+    }
+    void sendOffs (juce::MidiBuffer& out, int at, int channel)
+    {
+        for (int pitch = 0; pitch < 128; ++pitch)
+            if (outOn[channel][pitch])
+            {
+                out.addEvent (juce::MidiMessage::noteOff (channel + 1, pitch), at);
+                outOn[channel][pitch] = false;
+            }
     }
     void removeHeld (int note) { int w = 0; for (int k = 0; k < nHeld; ++k) if (held[k] != note) held[w++] = held[k]; nHeld = w; }
 
@@ -1524,14 +1645,14 @@ private:
         pos += len;
         double s0 = std::fmod (start, loopLen); if (s0 < 0) s0 += loopLen;
         const double s1 = s0 + len;
-        const int midiMode = (int) get (midioutI), playMode = (int) get (playI);
+        const int playMode = (int) get (playI);
         const float chordsL = get (chordsI);
         const bool first = justStarted; justStarted = false;
         for (int i = 0; i < numNotes; ++i)
         {
             const auto& nt = notes[i];
             const int p = juce::jlimit (0, 127, nt.pitch + transpose);
-            const bool toMidi = midiMode == 0 ? ! nt.chord : midiMode == 1;
+            const bool toMidi = blockMidiMode == 0 ? ! nt.chord : blockMidiMode == 1;
             const int ch = nt.chord ? 1 : 0;
             for (double base : { 0.0, loopLen })
             {
@@ -1611,7 +1732,7 @@ private:
     float sr = 44100; Voice voices[16]; juce::Reverb rev; Limiter lim; Smooth outSm;
     Note notes[maxNotes]; int numNotes = 0; GenKey lastKey {};
     bool outOn[2][128] {}; bool wasHostPlaying = false, running = false, wasSingle = false, songMode = false, justStarted = false, pendingRegen = false;
-    int held[16] {}; int nHeld = 0, transpose = 0;
+    int held[16] {}; int nHeld = 0, transpose = 0, blockMidiMode = 0;
     double pos = 0, loopLen = 32, ppqInc = 0.001, blockHostPpq = 0, blockBeat0 = -1.0;
     juce::MidiBuffer outMidi;
     std::array<std::atomic<int>, 16> locks;
@@ -1625,9 +1746,9 @@ public:
       : Editor (p, BOY_NAME, "melody  |  hold a note", 960, 660), tp (p)
     {
         notes.resize (maxNotes);
-        addButton ("NEW MELODY", [this] { tp.setParam ("variation", 0.0f); tp.setParam ("seed", (float) juce::Random::getSystemRandom().nextInt ({ 1, 10000 })); },
+        addButton ("NEW MELODY", [this] { tp.chooseMelody (false, tp.randomEngine()); },
                    [] { return juce::String ("a new seed: a whole new melody (locked bars and bars you edited stay)"); });
-        addButton ("VARIATION", [this] { tp.setParam ("variation", (float) juce::Random::getSystemRandom().nextInt ({ 1, 100 })); },
+        addButton ("VARIATION", [this] { tp.chooseMelody (true, tp.randomEngine()); },
                    [] { return juce::String ("the same melody, a few notes changed"); });
         addButton ("SAVE MIDI", [this] { exportMidi(); }, [] { return juce::String ("save the melody (with your edits) as a .mid file"); });
         addButton ("DRAG MIDI", {}, [] { return juce::String ("hold and drag onto FL's playlist or piano roll"); }, true);

@@ -46,6 +46,46 @@ static int tuneChecks (boy::BaseProcessor& base)
         std::printf ("  [%s] bar lock: bar 3 kept, %d other bars changed, state %s\n", ok && kept ? "OK" : "FAIL", others, kept ? "kept" : "LOST");
         fails += ok && kept ? 0 : 1;
     }
+    // Candidate selection changes free bars and is undoable.
+    {
+        TuneProcessor p;
+        p.setParam ("seed", 6102.0f);
+        p.toggleLock (1);
+        const EditNote custom { 0, 8, 72, 100 };
+        p.edits.set (2, &custom, 1);
+        const int before = p.generateNow (a.data());
+        std::mt19937 rng (338);
+        const bool moved = p.chooseMelody (false, rng);
+        const int after = p.generateNow (b.data());
+        const bool protectedBars = melody (a, before, 1) == melody (b, after, 1)
+                                && melody (a, before, 2) == melody (b, after, 2);
+        const bool distinct = melody (a, before, 0) != melody (b, after, 0)
+                           || melody (a, before, 3) != melody (b, after, 3);
+        p.undo();
+        const bool undone = (int) p.get (seedI) == 6102;
+        p.toggleFrozen ("seed"); p.toggleFrozen ("rhythm"); p.toggleFrozen ("scale");
+        p.setParam ("rhythm", 3.0f); p.setParam ("scale", 5.0f);
+        p.setFrenchcore (true);
+        p.randomize();
+        const bool frozen = p.get (seedI) == 6102 && p.get (rhythmI) == 3 && p.get (scaleI) == 5;
+        TuneProcessor epic;
+        epic.setParam ("epic", 1.0f); epic.setParam ("bars", 2.0f);
+        epic.toggleLock (1);
+        const int epicBefore = epic.generateNow (a.data());
+        const bool epicMoved = epic.chooseMelody (false, rng);
+        const int epicAfter = epic.generateNow (b.data());
+        const bool epicLock = melody (a, epicBefore, 1) == melody (b, epicAfter, 1);
+        MemoryBlock saved;
+        epic.getStateInformation (saved);
+        TuneProcessor loaded;
+        loaded.setStateInformation (saved.getData(), (int) saved.getSize());
+        const int restored = loaded.generateNow (a.data());
+        bool epicKept = restored == epicAfter;
+        for (int bar = 0; bar < 16; ++bar) epicKept = epicKept && melody (a, restored, bar) == melody (b, epicAfter, bar);
+        const bool ok = moved && distinct && protectedBars && undone && frozen && epicMoved && epicLock && epicKept;
+        std::printf ("  [%s] melody choice changes unlocked bars, supports undo and respects Freeze\n", ok ? "OK" : "FAIL");
+        fails += ok ? 0 : 1;
+    }
     // 4) a change while it plays starts at the next bar: no new note before the bar line
     {
         tp.applyPreset (0);
@@ -96,6 +136,43 @@ static int tuneChecks (boy::BaseProcessor& base)
         std::printf ("  [%s] single note: level while held %.3f, after release %.5f, %d MIDI events out\n", ok ? "OK" : "FAIL", held, after, midiOut);
         fails += ok ? 0 : 1;
         tp.setParam ("mode", 0.0f);
+    }
+    {
+        bool ok = true;
+        for (int transition = 0; transition < 3; ++transition)
+        {
+            TuneProcessor p;
+            p.setParam ("midiout", 1.0f);
+            const EditNote first { 0, 8, 72, 100 };
+            p.edits.set (0, &first, 1);
+            p.setPlayConfigDetails (0, 2, 44100, 256); p.prepareToPlay (44100, 256);
+            AudioBuffer<float> buf (2, 256);
+            MidiBuffer midi;
+            midi.addEvent (MidiMessage::noteOn (1, 60, (uint8) 100), 0);
+            p.processBlock (buf, midi);
+            std::array<std::array<bool, 128>, 2> active {};
+            for (const auto ev : midi)
+            {
+                const auto msg = ev.getMessage();
+                if (msg.isNoteOn()) active[(size_t) (msg.getChannel() - 1)][(size_t) msg.getNoteNumber()] = true;
+            }
+            for (const auto& channel : active) ok = ok && std::any_of (channel.begin(), channel.end(), [] (bool on) { return on; });
+            if (transition == 0) p.setParam ("mode", 1.0f);
+            else p.setParam ("midiout", transition == 1 ? 2.0f : 0.0f);
+            midi.clear();
+            p.processBlock (buf, midi);
+            for (const auto ev : midi)
+            {
+                const auto msg = ev.getMessage();
+                ok = ok && msg.isNoteOff() && ev.samplePosition == 0;
+                if (msg.isNoteOff()) active[(size_t) (msg.getChannel() - 1)][(size_t) msg.getNoteNumber()] = false;
+            }
+            const bool leadRemains = std::any_of (active[0].begin(), active[0].end(), [] (bool on) { return on; });
+            const bool chordsRemain = std::any_of (active[1].begin(), active[1].end(), [] (bool on) { return on; });
+            ok = ok && ! chordsRemain && leadRemains == (transition == 2);
+        }
+        std::printf ("  [%s] mode and MIDI routing changes release the affected notes\n", ok ? "OK" : "FAIL");
+        fails += ok ? 0 : 1;
     }
     // 6) your own note edits: your notes replace the generated ones, they survive NEW MELODY, the state and a note-on in the loop
     {

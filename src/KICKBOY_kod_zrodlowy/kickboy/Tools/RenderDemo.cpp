@@ -72,6 +72,17 @@ static int kickChecks (boy::BaseProcessor& base)
         }
         const bool ok = rest[1] < 0.01f && rest[0] > 0.1f;
         std::printf ("  [%s] Note End: FULL rings %.3f, CUT %.4f after a 100 ms note\n", ok ? "OK" : "FAIL", rest[0], rest[1]); fails += ok ? 0 : 1;
+        bool shortCut = true;
+        for (double length : { 0.0, 0.001 })
+        {
+            const auto y = play (kp, 0.45, { { 0.01, 55 } }, length);
+            float peak = 0;
+            for (int i = (int) (0.15 * 44100); i < (int) (0.35 * 44100); ++i)
+                peak = jmax (peak, std::abs (y[(size_t) i]));
+            shortCut = shortCut && peak < 0.002f;
+        }
+        std::printf ("  [%s] CUT releases same-sample and 1 ms notes\n", shortCut ? "OK" : "FAIL");
+        fails += shortCut ? 0 : 1;
         kp.setParam ("noteend", 0.0f);
     }
     // 3b) bleed: after the kick is over nothing may keep sounding (default sound and every factory preset), and the

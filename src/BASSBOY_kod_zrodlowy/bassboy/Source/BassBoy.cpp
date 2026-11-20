@@ -144,7 +144,8 @@ public:
     void resetDsp() override
     {
         fl = fr = SVF{}; hp1 = hp2 = hp3 = hp4 = OnePole{}; tl = tr = Tilt{}; lim = Limiter{};
-        nHeld = 0; gateEnv = 0; wasPlaying = false; guiPos.store (-1.0f);
+        nHeld = 0; gateEnv = 0; wasPlaying = false; chordShift = 0;
+        chordVoices = {}; chordWasActive = false; guiPos.store (-1.0f);
         if (os) os->reset();
     }
 
@@ -160,7 +161,8 @@ public:
                     if (auto b = pos->getBpm()) if (std::isfinite (*b) && *b > 20.0) bpm = *b;
                     if (pos->getIsPlaying()) if (auto q = pos->getPpqPosition()) if (std::isfinite (*q)) { ppq = *q; hostPlaying = true; }
                 }
-        if (wasPlaying && ! hostPlaying) nHeld = 0;      // transport stopped -> release everything
+        bool heldChanged = wasPlaying && ! hostPlaying;
+        if (heldChanged) nHeld = 0;      // transport stopped -> release everything
         wasPlaying = hostPlaying;
         const double ppqInc = bpm / 60.0 / sr;
         const float gap = get (gapI), swell = get (swellI), rise = get (riseI), mix = get (mixI);
@@ -172,6 +174,13 @@ public:
         const float width = get (widthI), fadeBeats = (float) (get (fadeI) * 0.001 * bpm / 60.0);
         const float outG = juce::Decibels::decibelsToGain (get (outI)), velAmt = get (velI);
         const bool chord = get (voicesI) > 0.5f, useOs = get (osI) > 0.5f;
+        if (chord != chordWasActive)
+        {
+            chordVoices = {};
+            chordWasActive = chord;
+            heldChanged = true;
+            if (chord) anchorChord();
+        }
         hp1.set (get (lowcutI), sr); hp2.set (get (lowcutI), sr); hp3.set (get (lowcutI), sr); hp4.set (get (lowcutI), sr);
         tl.set (get (tiltI), sr); tr.set (get (tiltI), sr); lim.set (sr, get (ceilI));
         const float gateCoef = std::exp (-1.0f / (0.004f * sr));
@@ -186,37 +195,40 @@ public:
             for (int i = 0; i < m; ++i)
             {
                 const int s = start + i;
+                bool anchor = false;
                 while (it != midi.cend() && (*it).samplePosition <= s)
                 {
                     const auto msg = (*it).getMessage();
                     if (msg.isNoteOn())
                     {
+                        const bool wasEmpty = nHeld == 0;
                         removeHeld (msg.getNoteNumber());   // FL can resend note-on: never double-count
                         if (nHeld == 0 && ! hostPlaying) freePpq = ppq = 0;
                         if (nHeld == 0) curNote = (float) foldBass (msg.getNoteNumber());
-                        if (nHeld < 16) held[nHeld++] = msg.getNoteNumber();
                         velG = 1.0f - velAmt + velAmt * msg.getFloatVelocity();
+                        if (wasEmpty) anchor = true;
+                        if (nHeld < (int) held.size()) held[(size_t) nHeld++] = { msg.getNoteNumber(), velG };
+                        heldChanged = true;
                     }
-                    else if (msg.isNoteOff()) removeHeld (msg.getNoteNumber());
-                    else if (msg.isAllNotesOff() || msg.isAllSoundOff()) nHeld = 0;
+                    else if (msg.isNoteOff())
+                    {
+                        removeHeld (msg.getNoteNumber());
+                        heldChanged = true;
+                    }
+                    else if (msg.isAllNotesOff() || msg.isAllSoundOff()) { nHeld = 0; heldChanged = true; }
                     ++it;
                 }
+                if (chord && heldChanged)
+                {
+                    if (anchor) anchorChord();
+                    updateChord();
+                }
+                heldChanged = false;
                 gateEnv = (nHeld > 0 ? 1.0f : 0.0f) + gateCoef * (gateEnv - (nHeld > 0 ? 1.0f : 0.0f));
                 if (gateEnv < 1e-4f && nHeld == 0) { xl[i] = xr[i] = 0; envBuf[(size_t) i] = 0; gBuf[(size_t) i] = 0; ppq += ppqInc; continue; }
 
-                // the voices: Mono = the last key (with glide), Chord = every held key (up to 4), all moved by the
-                // same fold as the lowest key so the chord keeps its shape
-                int lowest = 128; for (int k = 0; k < nHeld; ++k) lowest = juce::jmin (lowest, held[k]);
-                const int shift = lowest < 128 ? foldBass (lowest) - lowest : 0;
-                if (nHeld > 0) target = (float) foldBass (held[nHeld - 1]);
+                if (nHeld > 0) target = (float) foldBass (held[(size_t) (nHeld - 1)].note);
                 curNote = target + glideCoef * (curNote - target);
-                int nv = 1;
-                float notes[4] { curNote };
-                if (chord && nHeld > 1)
-                {
-                    nv = juce::jmin (4, nHeld);
-                    for (int k = 0; k < nv; ++k) notes[k] = (float) (held[nHeld - nv + k] + shift);
-                }
 
                 // pattern position (16 steps per bar of 4 beats)
                 double barPos = std::fmod (ppq, 4.0); if (barPos < 0) barPos += 4.0;
@@ -235,26 +247,38 @@ public:
                 lastPos = (float) (barPos / 4.0);
                 const float riseSt = rise * std::pow (pr, 4.0f);
                 float a = 0, b = 0;
-                for (int k = 0; k < nv; ++k)
+                auto renderVoice = [&] (Voice& v, float pitch, float level)
                 {
-                    auto& v = vo[(size_t) k];
-                    const float f = noteHz (notes[k] + octv + riseSt);
+                    const float f = noteHz (pitch + octv + riseSt);
                     const float dt1 = f * detUp / sr, dt2 = f * detDn / sr;
                     v.ph1 += dt1; if (v.ph1 >= 1) v.ph1 -= 1;
                     v.ph2 += dt2; if (v.ph2 >= 1) v.ph2 -= 1;
                     v.phS += (sub ? f * 0.5f : f) / sr; if (v.phS >= 1) v.phS -= 1;
                     const float s1 = 2 * v.ph1 - 1 - polyBlep (v.ph1, dt1), s2 = 2 * v.ph2 - 1 - polyBlep (v.ph2, dt2);
                     const float sine = std::sin (juce::MathConstants<float>::twoPi * v.phS);
-                    a += s1 * (1 - mix) + sine * mix;
-                    b += s2 * (1 - mix) + sine * mix;
+                    a += (s1 * (1 - mix) + sine * mix) * level;
+                    b += (s2 * (1 - mix) + sine * mix) * level;
+                };
+                if (chord)
+                {
+                    float voiceWeight = 0;
+                    for (auto& voice : chordVoices)
+                    {
+                        if (voice.note < 0) continue;
+                        voice.gain = voice.target + gateCoef * (voice.gain - voice.target);
+                        if (voice.target == 0 && voice.gain < 1e-4f) { voice.note = -1; continue; }
+                        renderVoice (voice.phase, (float) voice.pitch, voice.vel * voice.gain);
+                        voiceWeight += voice.gain;
+                    }
+                    const float comp = 1.0f / std::sqrt (juce::jmax (1.0f, voiceWeight));
+                    a *= comp; b *= comp;
                 }
-                const float comp = 1.0f / std::sqrt ((float) nv);   // a chord hits the distortion like one note
-                a *= comp; b *= comp;
+                else renderVoice (monoVoice, curNote, 1.0f);
                 const float mid = 0.5f * (a + b);
                 xl[i] = mid + 0.5f * width * (a - b);
                 xr[i] = mid - 0.5f * width * (a - b);
                 envBuf[(size_t) i] = env;
-                gBuf[(size_t) i] = env * gateEnv * velG;
+                gBuf[(size_t) i] = chord ? env : env * gateEnv * velG;
                 ppq += ppqInc;
             }
             // distortion, 2x oversampled (the saw at high drive no longer aliases)
@@ -286,12 +310,53 @@ public:
 
 private:
     struct Voice { float ph1 = 0, ph2 = 0.37f, phS = 0; };
-    void removeHeld (int note) { int w = 0; for (int k = 0; k < nHeld; ++k) if (held[k] != note) held[w++] = held[k]; nHeld = w; }
+    struct HeldNote { int note; float vel; };
+    struct ChordVoice { Voice phase; int note = -1, pitch = 0; float gain = 0, target = 0, vel = 1; };
+    void removeHeld (int note)
+    {
+        int w = 0;
+        for (int k = 0; k < nHeld; ++k)
+            if (held[(size_t) k].note != note) held[(size_t) w++] = held[(size_t) k];
+        nHeld = w;
+    }
+    void anchorChord()
+    {
+        if (nHeld == 0) return;
+        int lowest = held[0].note;
+        for (int k = 1; k < nHeld; ++k) lowest = juce::jmin (lowest, held[(size_t) k].note);
+        chordShift = foldBass (lowest) - lowest;
+    }
+    void updateChord()
+    {
+        // Keep playing voices attached to their keys, including their pitch during release.
+        for (auto& voice : chordVoices) voice.target = 0;
+        for (int k = juce::jmax (0, nHeld - 4); k < nHeld; ++k)
+        {
+            const auto key = held[(size_t) k];
+            const int pitch = juce::jlimit (0, 127, key.note + chordShift);
+            auto slot = std::find_if (chordVoices.begin(), chordVoices.end(), [&] (const ChordVoice& v)
+            { return v.note == key.note && v.pitch == pitch; });
+            if (slot == chordVoices.end())
+            {
+                slot = std::min_element (chordVoices.begin(), chordVoices.end(), [] (const ChordVoice& a, const ChordVoice& b)
+                { return a.gain + a.target < b.gain + b.target; });
+                *slot = ChordVoice {};
+                slot->note = key.note;
+                slot->pitch = pitch;
+            }
+            slot->vel = key.vel;
+            slot->target = 1;
+        }
+    }
     static constexpr int chunk = 256;
     bool wasPlaying = false;
     float sr = 44100, curNote = 36, target = 36, velG = 1, gateEnv = 0;
-    double freePpq = 0; int held[16] {}; int nHeld = 0; unsigned ctr = 0;
-    std::array<Voice, 4> vo {};
+    double freePpq = 0;
+    std::array<HeldNote, 16> held {};
+    int nHeld = 0, chordShift = 0; unsigned ctr = 0;
+    bool chordWasActive = false;
+    Voice monoVoice;
+    std::array<ChordVoice, 8> chordVoices {};
     std::unique_ptr<juce::dsp::Oversampling<float>> os;
     juce::AudioBuffer<float> pre; std::vector<float> envBuf, gBuf;
     SVF fl, fr; OnePole hp1, hp2, hp3, hp4; Tilt tl, tr; Limiter lim; Smooth outSm;

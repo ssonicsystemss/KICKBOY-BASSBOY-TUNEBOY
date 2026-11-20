@@ -2,11 +2,9 @@
 
 ## Download (Windows VST3)
 
-compiled:
-
-- [KICKBOY-win64-vst3.zip](https://github.com/ssonicsystemss/KICKBOY-BASSBOY-TUNEBOY/releases/download/v2026-10-21/KICKBOY-win64-vst3.zip)
-- [BASSBOY-win64-vst3.zip](https://github.com/ssonicsystemss/KICKBOY-BASSBOY-TUNEBOY/releases/download/v2026-10-21/BASSBOY-win64-vst3.zip)
-- [TUNEBOY-win64-vst3.zip](https://github.com/ssonicsystemss/KICKBOY-BASSBOY-TUNEBOY/releases/download/v2026-10-21/TUNEBOY-win64-vst3.zip)
+- [KICKBOY-win64-vst3.zip](https://github.com/ssonicsystemss/KICKBOY-BASSBOY-TUNEBOY/releases/latest/download/KICKBOY-win64-vst3.zip)
+- [BASSBOY-win64-vst3.zip](https://github.com/ssonicsystemss/KICKBOY-BASSBOY-TUNEBOY/releases/latest/download/BASSBOY-win64-vst3.zip)
+- [TUNEBOY-win64-vst3.zip](https://github.com/ssonicsystemss/KICKBOY-BASSBOY-TUNEBOY/releases/latest/download/TUNEBOY-win64-vst3.zip)
 
 ![BOY series at a glance](docs/infographic.png)
 
@@ -17,6 +15,12 @@ compiled:
 | TUNEBOY | melody + chords generator | piano roll, bar locks |
 
 ## What's new
+
+- **KICKBOY 2.0.1:** CUT responds to very short MIDI notes.
+- **BASSBOY 2.0.1:** Chord mode fades released voices independently and keeps their pitch through release.
+- **TUNEBOY 2.2.1:** NEW MELODY and VARIATION choose among several candidates, including seeded variations of Epic themes. MIDI routing changes release active notes, and MIDI export writes the replacement before overwriting the original.
+- **All three:** RANDOMIZE favours the middle of each continuous range and skips the current option when drawing from a choice.
+
 - **TUNEBOY 2.2:** edit the melody in the roll (drag notes, add, delete), **DRAW** a melody with the mouse, edit undo, copy / transpose a bar,
   16 + Custom + 10 more chord progressions, 9 scales, 14 rhythms, **CHORD STYLE** (held / offbeat / arp / gate), **PUMP** (built-in sidechain duck),
   **OWN SOUND** (your own sample plays the notes), a bank of 24 synth sounds + **NEW SOUND** (random). RANDOMIZE no longer touches the sound.

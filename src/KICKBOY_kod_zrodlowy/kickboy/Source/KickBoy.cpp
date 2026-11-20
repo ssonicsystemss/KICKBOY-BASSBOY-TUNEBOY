@@ -176,7 +176,7 @@ public:
                     }
                     else if (msg.isNoteOff())
                     {
-                        if (cut && active && msg.getNoteNumber() == note && t > 0.002f && relAt < 0.0f) relAt = t;   // Note End = CUT
+                        if (cut && active && msg.getNoteNumber() == note && relAt < 0.0f) relAt = t;
                         own.release (s, msg.getNoteNumber());
                     }
                     else if (msg.isAllNotesOff() || msg.isAllSoundOff()) { active = false; own.release (s, -1); }

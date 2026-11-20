@@ -5,7 +5,8 @@
 using namespace juce;
 
 // hold some keys with the transport stopped (free-running pattern), return the left channel
-static std::vector<float> hold (BassProcessor& p, double seconds, std::initializer_list<int> notes)
+static std::vector<float> hold (BassProcessor& p, double seconds, std::initializer_list<int> notes,
+                                int releaseSample = -1, std::initializer_list<int> releases = {})
 {
     const double sr = 44100; const int bs = 256;
     p.setPlayConfigDetails (0, 2, sr, bs); p.prepareToPlay (sr, bs);
@@ -17,6 +18,8 @@ static std::vector<float> hold (BassProcessor& p, double seconds, std::initializ
         const int n = jmin (bs, total - pos);
         MidiBuffer m;
         if (pos == 0) for (int nt : notes) m.addEvent (MidiMessage::noteOn (1, nt, (uint8) 100), 0);
+        if (releaseSample >= pos && releaseSample < pos + n)
+            for (int nt : releases) m.addEvent (MidiMessage::noteOff (1, nt), releaseSample - pos);
         AudioBuffer<float> v (b.getArrayOfWritePointers(), 2, n);
         p.processBlock (v, m);
         for (int i = 0; i < n; ++i) out[(size_t) (pos + i)] = v.getSample (0, i);
@@ -74,6 +77,22 @@ static int bassChecks (boy::BaseProcessor& base)
         bool clean = true; for (float v : three) clean = clean && std::isfinite (v) && std::abs (v) <= 1.0001f;
         const bool ok = clean && rmsOf (three) > rmsOf (one) * 0.8 && rmsOf (three) > 0.01;
         std::printf ("  [%s] chord mode: 1 key rms %.3f, 3 keys rms %.3f\n", ok ? "OK" : "FAIL", rmsOf (one), rmsOf (three)); fails += ok ? 0 : 1;
+    }
+    {
+        BassProcessor p;
+        p.setParam ("voices", 1.0f); p.setParam ("mix", 1.0f);
+        p.setParam ("gap", 0.0f); p.setParam ("swell", 0.3f); p.setParam ("rise", 0.0f);
+        p.setParam ("fenv", 0.0f); p.setParam ("os", 0.0f); p.setParam ("drive", 0.0f);
+        const int release = 15331;
+        const auto held = hold (p, 0.55, { 60, 64, 67 });
+        const auto bottomUp = hold (p, 0.55, { 60, 64, 67 }, release, { 60 });
+        const auto allUp = hold (p, 0.55, { 60, 64, 67 }, release, { 60, 64, 67 });
+        const float jump = jmax (std::abs (held[(size_t) release] - bottomUp[(size_t) release]),
+                                 std::abs (held[(size_t) release] - allUp[(size_t) release]));
+        const std::vector<float> tail (allUp.begin() + release + 2400, allUp.begin() + release + 4400);
+        const bool ok = jump < 0.015f && rmsOf (tail) < 0.002;
+        std::printf ("  [%s] releasing the bass chord fades the voices (first difference %.4f)\n", ok ? "OK" : "FAIL", jump);
+        fails += ok ? 0 : 1;
     }
     return fails;
 }
